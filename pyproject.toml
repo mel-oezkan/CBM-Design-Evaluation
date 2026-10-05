@@ -11,9 +11,6 @@ dependencies = [
     "pandas>=2.1",
     "pyyaml>=6.0",
     "pillow>=10.0",
-    "modal>=1.6.1",
-    "wandb>=0.30.0",
-    "weave>=0.53.11",
 ]
 
 [project.optional-dependencies]
@@ -21,7 +18,8 @@ clip = ["open_clip_torch>=2.24"]
 hf = ["transformers>=4.40"]
 llm = ["anthropic>=0.40"]
 analysis = ["statsmodels>=0.14"]
-tracking = ["wandb>=0.17"]  # scripts/koh2020_modal.py mirrors result rows to W&B
+tracking = ["wandb>=0.30.0"]
+modal = ["modal>=1.6.1"]  # scripts/koh2020_modal.py (its container installs wandb itself)
 
 [dependency-groups]
 dev = ["pytest>=8.0"]
