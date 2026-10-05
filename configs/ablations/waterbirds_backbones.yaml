@@ -1,0 +1,10 @@
+# Non-CLIP backbones keep CLIP as the teacher for pseudo-labels and text filters.
+anchor: ../anchors/waterbirds_lfcbm.yaml
+mode: ofat
+seeds: [0, 1, 2]
+overrides:
+  teacher: {name: clip, model: ViT-B-16, pretrained: openai}
+factors:
+  backbone:
+    - {name: dinov2, model: dinov2_vitb14}
+    - {name: resnet, model: resnet50}

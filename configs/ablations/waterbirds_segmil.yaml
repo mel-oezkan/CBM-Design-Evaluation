@@ -1,0 +1,14 @@
+# Which part of SEG-MIL-CBM carries the worst-group gain? One factor at a time around the anchor.
+anchor: ../anchors/waterbirds_segmil.yaml
+mode: ofat
+seeds: [0, 1, 2]
+factors:
+  instances:                                   # does concept-guided segmentation matter?
+    - {name: patches}                          # ViT patch tokens, no segmentation
+    - {name: grounded_boxes, top_k: 10, boxes_per_concept: 2, max_segments: 16}   # no SAM
+    - {name: sam_grid, points_per_side: 8, max_segments: 16}                       # concept-agnostic
+  instances.encode: [pool]                     # pooled patch tokens instead of one forward per segment
+  stages.predictor.pooling: [mean, max]        # does attention matter?
+  stages.predictor.area_gamma: [0.0]
+  stages.training.concept_weight: [0.0, 1.0]   # how much does concept supervision constrain the head?
+  stages.alignment.targets: [standardized]

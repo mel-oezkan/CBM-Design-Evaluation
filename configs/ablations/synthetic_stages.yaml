@@ -1,0 +1,16 @@
+# One-factor-at-a-time sweep over every stage on the offline anchor.
+anchor: ../anchors/synthetic.yaml
+mode: ofat
+seeds: [0, 1, 2]
+factors:
+  stages.discovery:
+    - {name: dataset}
+    - {name: sae, n_latents: 64, k: 6, epochs: 30}
+  stages.filtering:
+    - [{name: rules}]
+    - [{name: rules}, {name: select, k: 20, method: random}]
+    - [{name: rules}, {name: dino, scorer: oracle}, {name: select, k: 20}]
+  stages.generation: [{name: embeddings}, {name: boc}]
+  stages.alignment: [{name: weights}, {name: human}, {name: dino, scorer: oracle}]
+  stages.predictor: [{name: dense}, {name: residual}]
+  stages.training: [{name: independent}, {name: joint}]

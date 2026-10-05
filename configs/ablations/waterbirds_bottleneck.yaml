@@ -1,0 +1,7 @@
+anchor: ../anchors/waterbirds_lfcbm.yaml
+mode: grid
+seeds: [0, 1, 2]
+factors:
+  stages.generation: [{name: scores}, {name: embeddings}, {name: boc}]
+  stages.predictor: [{name: sparse, lam: 0.0007}, {name: dense}, {name: residual}]
+  stages.training: [{name: sequential}, {name: joint}]

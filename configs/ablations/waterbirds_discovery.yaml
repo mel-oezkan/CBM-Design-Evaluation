@@ -1,0 +1,8 @@
+anchor: ../anchors/waterbirds_lfcbm.yaml
+mode: ofat
+seeds: [0, 1, 2]
+factors:
+  stages.discovery:
+    - {name: vlm}
+    - {name: kb}
+    - {name: sae, n_latents: 512}
