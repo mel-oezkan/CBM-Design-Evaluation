@@ -151,6 +151,11 @@ class _Base(Training):
     def _concept_loss(self, layer: ConceptLayer, b: Batch) -> torch.Tensor:
         return concept_loss(layer, b.x, b.t, b.bag, self.concept_loss)
 
+    def _task_loss(self, logits: torch.Tensor, b: Batch) -> torch.Tensor:
+        """Class logits (N, C) -> scalar task loss. The one place every variant computes it; override
+        it in a subclass (registered under a new name) to try another task loss."""
+        return F.cross_entropy(logits, b.y)
+
     def _fit_concepts(self, layer, aligned, tr: Batch, va: Batch, seed) -> dict[str, float]:
         if not aligned.has_targets or layer.frozen:
             return {}
@@ -168,7 +173,7 @@ class _Base(Training):
         out: dict[str, float] = {}
 
         def task_loss(b: Batch) -> torch.Tensor:
-            return F.cross_entropy(head(rep_fn(b), layer.normalize(b.x), b.bag), b.y)
+            return self._task_loss(head(rep_fn(b), layer.normalize(b.x), b.bag), b)
 
         for i, phase in enumerate(head.phases()):
             groups = [self._head_group(head, phase)] + ([(layer.rep_params(), "adam", self.lr)] if i == 0 else [])
@@ -230,7 +235,7 @@ class Joint(_Base):
 
         def total(b: Batch) -> torch.Tensor:
             _, rep = layer(b.x)
-            loss = F.cross_entropy(head(rep, layer.normalize(b.x), b.bag), b.y)
+            loss = self._task_loss(head(rep, layer.normalize(b.x), b.bag), b)
             if use_c:
                 loss = loss + self.concept_weight * self._concept_loss(layer, b)
             return loss

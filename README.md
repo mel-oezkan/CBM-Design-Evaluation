@@ -162,6 +162,27 @@ All metrics are prefixed by their evaluator name, e.g. `shift.test.wga`.
 - `leakage`:
   - `intervention.acc@f` / `intervention.gain`: accuracy after replacing a random fraction `f` of
     concept predictions with ground truth. Ground truth is human annotations when every concept is
+A new loss is a training subclass that overrides one hook, `_task_loss(logits, batch)` or
+`_concept_loss(layer, batch)`, registered under its own name:
+
+```python
+import torch.nn.functional as F
+
+from cbm_eval.registry import TRAINING
+from cbm_eval.stages.training import Joint
+
+@TRAINING.register("joint_smooth")
+class JointSmooth(Joint):
+    def __init__(self, smoothing: float = 0.1, **kw):
+        super().__init__(**kw)
+        self.smoothing = smoothing
+
+    def _task_loss(self, logits, b):
+        return F.cross_entropy(logits, b.y, label_smoothing=self.smoothing)
+```
+
+See `CLAUDE.md` for the full contract per component kind.
+
     annotated and the layer predicts binary concepts. Otherwise it is the alignment's own targets,
     and gains are then expected to be near zero for pseudo-label alignment.
   - `probe.soft_hard_gap`: accuracy of a probe on soft scores minus one on binarized scores.

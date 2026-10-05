@@ -4,7 +4,9 @@ import pytest
 import torch
 
 from cbm_eval.pipeline import PipelineBuilder, run, sweep
+from cbm_eval.registry import TRAINING
 from cbm_eval.results import ResultsStore
+from cbm_eval.stages.training import Joint, Sequential
 
 
 def _ok(metrics):
@@ -48,6 +50,24 @@ def test_every_stage_variant_runs(base_cfg, stage, spec):
     res = run(cfg, save=False)
     assert _ok(res.metrics), res.metrics
     assert res.metrics["shift.test.acc"] > 0.4
+
+
+@pytest.mark.parametrize("parent", [Sequential, Joint])
+def test_task_loss_hook_is_used(base_cfg, parent):
+    calls = []
+
+    class Counted(parent):
+        def _task_loss(self, logits, b):
+            calls.append(len(b))
+            return super()._task_loss(logits, b)
+
+    TRAINING._items["_counted"] = Counted  # registered by hand so the name can be reused per parameter
+    try:
+        cfg = base_cfg.with_overrides({"stages.training": {"name": "_counted", "epochs": 2}})
+        assert _ok(run(cfg, save=False).metrics)
+    finally:
+        del TRAINING._items["_counted"]
+    assert calls
 
 
 def test_human_alignment_beats_chance_on_interventions(base_cfg):
