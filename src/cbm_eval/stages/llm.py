@@ -12,7 +12,7 @@ DEFAULT_MODEL = "claude-opus-5-5"
 
 
 class ClaudeClient:
-    """Calls the Claude Messages API (``pip install cbm-eval[llm]``).
+    """Calls the Claude Messages API (``uv sync --extra llm``).
 
     Credentials come from the environment (``ANTHROPIC_API_KEY`` or an ``ant auth login`` profile).
     Server-side refusal fallback is enabled so a declined request is retried on another model.

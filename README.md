@@ -9,20 +9,20 @@ leakage and localization, and logged as one row per run and seed for factor-leve
 ## Setup
 
 ```bash
-uv venv && uv pip install -e ".[dev]"          # core + tests
-uv pip install -e ".[clip,hf,llm,analysis]"     # CLIP, Grounding DINO, Claude discovery, mixed models
-.venv/bin/python -m pytest -q                    # fully offline, ~5 s
+uv sync                                          # core + dev group (pytest)
+uv sync --all-extras                             # + CLIP, Grounding DINO, Claude discovery, mixed models
+uv run pytest -q                                 # fully offline, ~5 s
 ```
 
 ## Quickstart
 
 ```bash
-cbm-eval list                                               # registered components per stage
-cbm-eval run configs/anchors/synthetic.yaml --seeds 0 1 2   # offline anchor
-cbm-eval run configs/anchors/synthetic.yaml --set stages.predictor.lam=0.01
-cbm-eval sweep configs/ablations/synthetic_stages.yaml --dry-run
-cbm-eval sweep configs/ablations/synthetic_stages.yaml
-cbm-eval analyze --results results/synthetic.jsonl --metric shift.test.wga --frontier leakage.intervention.gain
+uv run cbm-eval list                                               # registered components per stage
+uv run cbm-eval run configs/anchors/synthetic.yaml --seeds 0 1 2   # offline anchor
+uv run cbm-eval run configs/anchors/synthetic.yaml --set stages.predictor.lam=0.01
+uv run cbm-eval sweep configs/ablations/synthetic_stages.yaml --dry-run
+uv run cbm-eval sweep configs/ablations/synthetic_stages.yaml
+uv run cbm-eval analyze --results results/synthetic.jsonl --metric shift.test.wga --frontier leakage.intervention.gain
 ```
 
 ## Layout

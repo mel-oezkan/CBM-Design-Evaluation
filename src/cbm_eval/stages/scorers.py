@@ -37,7 +37,7 @@ class OracleScorer:
 
 @SCORERS.register("grounding_dino")
 class GroundingDINOScorer:
-    """Max box confidence per concept (``pip install cbm-eval[hf]``). Results are cached on disk."""
+    """Max box confidence per concept (``uv sync --extra hf``). Results are cached on disk."""
 
     def __init__(self, model: str = "IDEA-Research/grounding-dino-tiny", box_threshold: float = 0.25,
                  concepts_per_prompt: int = 16, batch_size: int = 8):

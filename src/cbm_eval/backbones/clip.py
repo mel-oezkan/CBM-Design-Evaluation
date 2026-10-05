@@ -1,4 +1,4 @@
-"""OpenCLIP image/text encoders (``pip install cbm-eval[clip]``)."""
+"""OpenCLIP image/text encoders (``uv sync --extra clip``)."""
 
 from __future__ import annotations
 
