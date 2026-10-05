@@ -6,34 +6,47 @@ from six interchangeable stages, trained on cached backbone features, evaluated 
 leakage and localization, and logged as one row per run and seed for factor-level analysis.
 <!-- --8<-- [end:intro] -->
 
-![architecture](cbm_research_code_architecture.png)
+![Data flow of one run: config, pipeline builder, stages, trained CBM, evaluators, results](docs/assets/architecture.svg)
 
-<!-- --8<-- [start:start] -->
+The full documentation (getting started, architecture, component catalogue, API reference) is a
+docs site built from `docs/`: run `uv run --group docs properdocs serve` and open
+http://127.0.0.1:8000.
+
 ## Setup
 
 ```bash
 uv sync                                          # core + dev group (pytest)
-uv sync --all-extras                             # + CLIP, Grounding DINO, Claude discovery, mixed models
+uv sync --all-extras                             # + CLIP, Grounding DINO, Claude, statsmodels, W&B, Modal
 uv run pytest -q                                 # fully offline, ~5 s
 uv run --group docs properdocs serve             # docs site at http://127.0.0.1:8000
 ```
+
+Requires Python 3.10+ and [uv](https://docs.astral.sh/uv/). The extras are `clip` (OpenCLIP),
+`hf` (Grounding DINO and SAM via transformers), `llm` (Claude concept discovery), `analysis`
+(mixed-effects models via statsmodels), `tracking` (W&B) and `modal` (the Modal runner in
+`scripts/`). Pretrained weights (CLIP, DINOv2,
+ResNet, Inception) download on first use.
 
 ## Quickstart
 
 ```bash
 uv run cbm-eval list                                               # registered components per stage
-uv run cbm-eval run configs/anchors/synthetic.yaml --seeds 0 1 2   # offline anchor
-uv run cbm-eval run configs/anchors/synthetic.yaml --set stages.predictor.lam=0.01
-uv run cbm-eval sweep configs/ablations/synthetic_stages.yaml --dry-run
-uv run cbm-eval sweep configs/ablations/synthetic_stages.yaml
+uv run cbm-eval run configs/anchors/synthetic.yaml --seeds 0 1 2   # one config, three seeds (offline)
+uv run cbm-eval run configs/anchors/synthetic.yaml --set stages.predictor.lam=0.01   # override a key
+uv run cbm-eval sweep configs/ablations/synthetic_stages.yaml --dry-run              # list the runs
+uv run cbm-eval sweep configs/ablations/synthetic_stages.yaml                        # run them
 uv run cbm-eval analyze --results results/synthetic.jsonl --metric shift.test.wga --frontier leakage.intervention.gain
 ```
-<!-- --8<-- [end:start] -->
+
+The synthetic anchor needs no data, weights or network access and finishes in about a second;
+the full synthetic sweep (45 runs) takes under a minute on a laptop CPU. Results are appended
+to `results/synthetic.jsonl`, and each run's weights and concept scores are saved under
+`runs/synthetic/`.
 
 <!-- --8<-- [start:layout] -->
 ## Layout
 
-| Diagram box | Code |
+| Part | Code (under `src/cbm_eval/`) |
 |---|---|
 | Experiment configs | `configs/anchors/*.yaml`, `configs/ablations/*.yaml`, `src/cbm_eval/config.py` |
 | Datasets | `data/` — `waterbirds`, `cub`, `metashift`, `synthetic` |
@@ -204,16 +217,20 @@ class JointSmooth(Joint):
         return F.cross_entropy(logits, b.y, label_smoothing=self.smoothing)
 ```
 
-See `CLAUDE.md` for the full contract per component kind.
 <!-- --8<-- [end:adding] -->
+
+See the *Contributing* page of the docs site (or [`CLAUDE.md`](CLAUDE.md), which holds the same
+rules) for the full contract per component kind.
 
 ## Data
 <!-- --8<-- [start:data] -->
 
 Point `dataset.root` at:
 
-- **Waterbirds**: the standard folder with `metadata.csv` (`img_filename, y, split, place`).
-- **CUB**: the official `CUB_200_2011` directory. Attributes are class-level majority-voted by
+- **Waterbirds**: the standard folder with `metadata.csv` (`img_filename, y, split, place`), as
+  released with group DRO (`waterbird_complete95_forest2water2`).
+- **CUB**: the official `CUB_200_2011` directory
+  ([Caltech data record](https://data.caltech.edu/records/65de6-vp158)). Attributes are class-level majority-voted by
   default (`majority_vote: mean`: >= 50% of the class's official-train images, counting "not
   visible" as absent; 93 concepts). `majority_vote: koh` follows Koh et al.'s code (train split only,
   "not visible" negatives ignored, ties -> present; 112 concepts), and `split_dir:` takes their
@@ -223,7 +240,9 @@ Point `dataset.root` at:
   `wget https://github.com/hamedbehzadi/CUB70-PartSegmentationDataset/raw/main/AnnotationMasksPerclass.tar.xz`,
   then extract to `<root>/part_segmentations/` (or set `dataset.part_segmentations`).
 - **MetaShift**: a folder with `metadata.csv` (`filename, y, a, split`), as produced by the
-  SubpopBench preprocessing scripts.
+  [SubpopBench](https://github.com/YyzHarry/SubpopBench) preprocessing scripts.
+- **Synthetic**: generated in memory; no `root` needed. Pair it with the `toy` backbone for fully
+  offline runs.
 
 Backbone features are cached under `paths.cache/features/` and keyed by dataset and backbone. All
 runs sharing a dataset and backbone reuse them, so training a CBM runs only on cached tensors.
@@ -256,16 +275,23 @@ All metrics are prefixed by their evaluator name, e.g. `shift.test.wga`.
 - `localization`: pointing game and locality (map mass inside the annotated region, with
   `locality_chance` for reference). Only concepts that match an annotated dataset concept by name
   are scored.
+- `keypoint_distance`, `part_iou`: CUB part localization against keypoints and part masks (see
+  *Part localization*).
+- `faithfulness`: deletion / insertion AUC (`dauc`, `iauc`, with `*_random` controls),
+  `top1_insertion` and `top5_deletion` over segments ranked by their contribution to the
+  prediction. Bag-aware heads (`predictor: mil`) only.
 <!-- --8<-- [end:metrics] -->
 
 <!-- --8<-- [start:status] -->
 ## Status
 
-The whole pipeline and every stage variant are tested end-to-end on the synthetic dataset and toy
-backbone. The tests also cover the image-file path: a fake Waterbirds folder, an untrained ResNet-18,
-and stub LLM/VLM clients.
+This is research code under active development. The whole pipeline and every stage variant are
+tested end-to-end on the synthetic dataset and toy backbone. The tests also cover the image-file
+path: a fake Waterbirds folder, an untrained ResNet-18, and stub LLM/VLM clients.
 
-**Not yet run against real data or pretrained weights:** OpenCLIP and DINOv2 feature extraction
-(including ViT patch tokens), the CUB and MetaShift loaders, live Claude/ConceptNet calls, and
-Grounding DINO scoring. Expect small fixes on first contact.
+The CUB loader and the Inception-v3 backbone have been run on the real dataset (frozen-backbone
+runs of the Koh et al. 2020 reproduction). **Not yet run against real data or pretrained
+weights:** OpenCLIP and DINOv2 feature extraction (including ViT patch tokens), the Waterbirds and
+MetaShift loaders, live Claude/ConceptNet calls, Grounding DINO scoring, and end-to-end backbone
+fine-tuning. Expect small fixes on first contact, and please open an issue when you hit one.
 <!-- --8<-- [end:status] -->

@@ -1,0 +1,179 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="cbmd" viewBox="0 0 924 958" role="img" aria-labelledby="cbmd-flow-title cbmd-flow-desc">
+<title id="cbmd-flow-title">cbm-eval data flow</title>
+<desc id="cbmd-flow-desc">One run: ExperimentConfig goes to the PipelineBuilder, which builds every component from a registry. Discovery produces a ConceptSet, the filter chain prunes it, Alignment produces AlignedConcepts, Generation builds a ConceptLayer and the Predictor a PredictorHead, Training fits both into a TrainedCBM, evaluators score it, one row per run and seed goes to the ResultsStore, and analysis aggregates the rows. A shared Context on the right holds the dataset, backbones and instance source and serves cached features, text embeddings, instance bags and part annotations to the stages.</desc>
+<style>
+.cbmd { --fg: var(--cbm-ink, #1E1D24); --muted: var(--cbm-muted, #5D5B66); --line: var(--cbm-infra-line, #A39F95);
+  --surface: var(--cbm-surface, #FFFFFF); --infra: var(--cbm-infra-bg, #F1EFE9); --stage: var(--cbm-stage-bg, #EEECFC);
+  --stage-line: var(--cbm-stage-line, #7268CC); --eval: var(--cbm-eval-bg, #E1F3EC); --eval-line: var(--cbm-eval-line, #2E8A6A);
+  --accent: var(--cbm-accent, #4A3FB0);
+  --sans: var(--md-text-font-family, "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif);
+  --mono: var(--md-code-font-family, "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  color: var(--line); max-width: 100%; height: auto; }
+/* Standalone (README image): no site variables, so follow the OS theme. Inline in the docs, the
+   --cbm-* tokens from stylesheets/extra.css follow the theme toggle instead. */
+@media (prefers-color-scheme: dark) { .cbmd:root { --fg: #ECEAF3; --muted: #A4A1B0; --line: #625F58; --surface: #1C1B23;
+  --infra: #23222A; --stage: #252148; --stage-line: #7E74E0; --eval: #11302A; --eval-line: #3FA582; --accent: #ADA4FF; } }
+.cbmd .plain { fill: var(--infra); stroke: var(--line); stroke-width: 1; }
+.cbmd .box { fill: var(--stage); stroke: var(--stage-line); stroke-width: 1; }
+.cbmd .ev { fill: var(--eval); stroke: var(--eval-line); stroke-width: 1; }
+.cbmd .ctx { fill: var(--surface); stroke: var(--line); stroke-width: 1; }
+.cbmd .t { fill: var(--fg); font: 600 14px var(--sans); }
+.cbmd .s { fill: var(--muted); font: 11.5px var(--mono); }
+.cbmd .xs { fill: var(--muted); font: 10.5px var(--mono); }
+.cbmd .n { fill: var(--fg); font: 11.5px var(--mono); }
+.cbmd .key { fill: var(--muted); font: 11px var(--mono); }
+.cbmd .lbl { fill: var(--accent); font: 11px var(--mono); }
+.cbmd .ctxlbl { fill: var(--muted); font: 10.5px var(--mono); }
+.cbmd .edge { stroke: var(--line); stroke-width: 1.3; fill: none; }
+.cbmd .dash { stroke: var(--line); stroke-width: 1.2; stroke-dasharray: 5 4; fill: none; }
+.cbmd .rule { stroke: var(--line); stroke-width: 0.8; opacity: 0.7; }
+.cbmd .mk { fill: var(--line); }
+.cbmd .mk-ctx { fill: var(--line); }
+</style>
+<defs>
+<marker id="cbmd-flow-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk" d="M0,0 L10,5 L0,10 z"/></marker>
+<marker id="cbmd-flow-ahc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk-ctx" d="M0,0 L10,5 L0,10 z"/></marker>
+</defs>
+<!-- left: where each step is configured or lives -->
+<text class="key" x="150" y="45" text-anchor="end">configs/*.yaml</text>
+<text class="key" x="150" y="129" text-anchor="end">pipeline.py</text>
+<text class="key" x="150" y="213" text-anchor="end">stages.discovery</text>
+<text class="key" x="150" y="297" text-anchor="end">stages.filtering[ ]</text>
+<text class="key" x="150" y="381" text-anchor="end">stages.alignment</text>
+<text class="key" x="150" y="461" text-anchor="end">stages.generation</text>
+<text class="key" x="150" y="477" text-anchor="end">stages.predictor</text>
+<text class="key" x="150" y="557" text-anchor="end">stages.training</text>
+<text class="key" x="150" y="634" text-anchor="end">model.py</text>
+<text class="key" x="150" y="650" text-anchor="end">runs/&lt;id&gt;-s&lt;seed&gt;/</text>
+<text class="key" x="150" y="739" text-anchor="end">evaluation[ ]</text>
+<text class="key" x="150" y="837" text-anchor="end">results.py</text>
+<text class="key" x="150" y="921" text-anchor="end">analysis.py</text>
+<!-- 0 config -->
+<rect class="plain" x="162" y="16" width="380" height="50" rx="7"/>
+<text class="t" x="352" y="37" text-anchor="middle">ExperimentConfig</text>
+<text class="s" x="352" y="55" text-anchor="middle">anchor + overrides · run_id = hash(config)</text>
+<line class="edge" x1="352" y1="66" x2="352" y2="98" marker-end="url(#cbmd-flow-ah)"/>
+<text class="lbl" x="362" y="87">Registry.build({name, **kw})</text>
+<!-- 1 builder -->
+<rect class="plain" x="162" y="100" width="380" height="50" rx="7"/>
+<text class="t" x="352" y="121" text-anchor="middle">PipelineBuilder</text>
+<text class="s" x="352" y="139" text-anchor="middle">builds every component · creates the Context</text>
+<line class="edge" x1="352" y1="150" x2="352" y2="182" marker-end="url(#cbmd-flow-ah)"/>
+<text class="lbl" x="362" y="171">discover(ctx)</text>
+<!-- 2 discovery -->
+<rect class="box" x="162" y="184" width="380" height="50" rx="7"/>
+<text class="t" x="352" y="205" text-anchor="middle">Discovery</text>
+<text class="s" x="352" y="223" text-anchor="middle">llm · vlm · kb · sae · dataset · static</text>
+<line class="edge" x1="352" y1="234" x2="352" y2="266" marker-end="url(#cbmd-flow-ah)"/>
+<text class="lbl" x="362" y="255">ConceptSet(names, vectors?, meta)</text>
+<!-- 3 filters -->
+<rect class="box" x="162" y="268" width="380" height="50" rx="7"/>
+<text class="t" x="352" y="289" text-anchor="middle">Filter chain</text>
+<text class="s" x="352" y="307" text-anchor="middle">rules · clip · dino · select, in config order</text>
+<line class="edge" x1="352" y1="318" x2="352" y2="350" marker-end="url(#cbmd-flow-ah)"/>
+<text class="lbl" x="362" y="339">subset() · trace [(stage, n)]</text>
+<!-- 4 alignment -->
+<rect class="box" x="162" y="352" width="380" height="50" rx="7"/>
+<text class="t" x="352" y="373" text-anchor="middle">Alignment</text>
+<text class="s" x="352" y="391" text-anchor="middle">clip · dino · human · segment_clip · weights</text>
+<line class="edge" x1="252" y1="402" x2="252" y2="434" marker-end="url(#cbmd-flow-ah)"/>
+<text class="lbl" x="262" y="423">AlignedConcepts(targets | init_weight, frozen)</text>
+<!-- 5 generation + predictor -->
+<rect class="box" x="162" y="436" width="180" height="58" rx="7"/>
+<text class="t" x="252" y="456" text-anchor="middle">Generation</text>
+<text class="s" x="252" y="473" text-anchor="middle">scores · logits</text>
+<text class="s" x="252" y="487" text-anchor="middle">embeddings · boc</text>
+<rect class="box" x="362" y="436" width="180" height="58" rx="7"/>
+<text class="t" x="452" y="456" text-anchor="middle">Predictor</text>
+<text class="s" x="452" y="473" text-anchor="middle">sparse · dense</text>
+<text class="s" x="452" y="487" text-anchor="middle">residual · mil</text>
+<line class="edge" x1="342" y1="465" x2="360" y2="465" marker-end="url(#cbmd-flow-ah)"/>
+<line class="edge" x1="252" y1="494" x2="252" y2="526" marker-end="url(#cbmd-flow-ah)"/>
+<line class="edge" x1="452" y1="494" x2="452" y2="526" marker-end="url(#cbmd-flow-ah)"/>
+<text class="lbl" x="262" y="515">ConceptLayer</text>
+<text class="lbl" x="462" y="515">PredictorHead</text>
+<!-- 6 training -->
+<rect class="box" x="162" y="528" width="380" height="50" rx="7"/>
+<text class="t" x="352" y="549" text-anchor="middle">Training</text>
+<text class="s" x="352" y="567" text-anchor="middle">independent · sequential · joint (+ *_weighted)</text>
+<line class="edge" x1="352" y1="578" x2="352" y2="610" marker-end="url(#cbmd-flow-ah)"/>
+<text class="lbl" x="362" y="599">fit() trains in place → train_log</text>
+<!-- 7 trained cbm -->
+<rect class="plain" x="162" y="612" width="380" height="50" rx="7"/>
+<text class="t" x="352" y="633" text-anchor="middle">TrainedCBM</text>
+<text class="s" x="352" y="651" text-anchor="middle">CBM(layer, head) · aligned · concept_scores</text>
+<line class="edge" x1="352" y1="662" x2="352" y2="694" marker-end="url(#cbmd-flow-ah)"/>
+<text class="lbl" x="362" y="683">evaluate(cbm, ctx)</text>
+<!-- 8 evaluators -->
+<rect class="ev" x="162" y="696" width="100" height="78" rx="7"/>
+<text class="t" x="212" y="716" text-anchor="middle">robustness</text>
+<text class="n" x="212" y="736" text-anchor="middle">shift</text>
+<rect class="ev" x="272" y="696" width="120" height="78" rx="7"/>
+<text class="t" x="332" y="716" text-anchor="middle">concepts</text>
+<text class="n" x="332" y="736" text-anchor="middle">concepts</text>
+<text class="n" x="332" y="751" text-anchor="middle">leakage</text>
+<text class="n" x="332" y="766" text-anchor="middle">faithfulness</text>
+<rect class="ev" x="402" y="696" width="140" height="78" rx="7"/>
+<text class="t" x="472" y="716" text-anchor="middle">grounding</text>
+<text class="n" x="472" y="736" text-anchor="middle">localization</text>
+<text class="n" x="472" y="751" text-anchor="middle">keypoint_distance</text>
+<text class="n" x="472" y="766" text-anchor="middle">part_iou</text>
+<line class="edge" x1="352" y1="774" x2="352" y2="806" marker-end="url(#cbmd-flow-ah)"/>
+<text class="lbl" x="362" y="795">{"shift.test.wga": …, …}</text>
+<!-- 9 results store -->
+<rect class="plain" x="162" y="808" width="380" height="50" rx="7"/>
+<text class="t" x="352" y="829" text-anchor="middle">ResultsStore</text>
+<text class="s" x="352" y="847" text-anchor="middle">JSONL · one row per (run_id, seed)</text>
+<line class="edge" x1="352" y1="858" x2="352" y2="890" marker-end="url(#cbmd-flow-ah)"/>
+<text class="lbl" x="362" y="879">load() → factor.*, metric.* columns</text>
+<!-- 10 analysis -->
+<rect class="plain" x="162" y="892" width="380" height="50" rx="7"/>
+<text class="t" x="352" y="913" text-anchor="middle">Analysis</text>
+<text class="s" x="352" y="931" text-anchor="middle">aggregate · effects · Pareto · eff. robustness</text>
+<!-- Context -->
+<rect class="ctx" x="626" y="184" width="284" height="590" rx="9"/>
+<text class="t" x="640" y="208">Context  (ctx)</text>
+<text class="xs" x="896" y="208" text-anchor="end">context.py</text>
+<text class="xs" x="640" y="226">built once per run by the builder</text>
+<text class="s" x="640" y="248">dataset</text><text class="xs" x="736" y="248">DATASETS</text>
+<text class="s" x="640" y="265">backbone</text><text class="xs" x="736" y="265">BACKBONES</text>
+<text class="s" x="640" y="282">teacher</text><text class="xs" x="736" y="282">optional text tower</text>
+<text class="s" x="640" y="299">instances</text><text class="xs" x="736" y="299">INSTANCES, optional</text>
+<text class="s" x="640" y="316">concepts</text><text class="xs" x="736" y="316">filtered set (builder)</text>
+<line class="rule" x1="640" y1="330" x2="896" y2="330"/>
+<text class="t" x="640" y="352">Cached accessors</text>
+<text class="s" x="640" y="373">split(s)</text><text class="xs" x="770" y="373">FeatureSplit</text>
+<text class="s" x="640" y="390">teacher_split(s)</text><text class="xs" x="770" y="390">teacher features</text>
+<text class="s" x="640" y="407">encode_text(ts)</text><text class="xs" x="770" y="407">text embeddings</text>
+<text class="s" x="640" y="424">inputs(s)</text><text class="xs" x="770" y="424">(N, D) or bag</text>
+<text class="s" x="640" y="441">instances(s)</text><text class="xs" x="770" y="441">InstanceSplit</text>
+<text class="s" x="640" y="458">parts(s)</text><text class="xs" x="770" y="458">PartSplit</text>
+<text class="s" x="640" y="475">image_split(s)</text><text class="xs" x="770" y="475">images (finetune)</text>
+<line class="rule" x1="640" y1="489" x2="896" y2="489"/>
+<text class="t" x="640" y="511">FeatureSplit</text>
+<text class="s" x="640" y="532">features</text><text class="xs" x="790" y="532">(N, D)</text>
+<text class="s" x="640" y="549">labels·attrs·groups</text><text class="xs" x="790" y="549">(N,)</text>
+<text class="s" x="640" y="566">concept_labels</text><text class="xs" x="790" y="566">(N, K_h)</text>
+<text class="s" x="640" y="583">patch_features</text><text class="xs" x="790" y="583">(N, P, D)</text>
+<text class="s" x="640" y="600">part_masks</text><text class="xs" x="790" y="600">(N, K_h, P)</text>
+<text class="xs" x="640" y="620">.cache/features/&lt;ds&gt;/&lt;split&gt;-&lt;hash&gt;.pt</text>
+<text class="xs" x="640" y="634">keyed on dataset + backbone</text>
+<line class="rule" x1="640" y1="648" x2="896" y2="648"/>
+<text class="t" x="640" y="670">Bag  (instances:)</text>
+<text class="s" x="640" y="691">inputs</text><text class="xs" x="790" y="691">(N, M, D)</text>
+<text class="s" x="640" y="708">mask · area</text><text class="xs" x="790" y="708">(N, M)</text>
+<text class="xs" x="640" y="732">Stages read ctx only through these</text>
+<text class="xs" x="640" y="747">accessors and never assign to it.</text>
+<!-- ctx reads -->
+<line class="dash" x1="626" y1="209" x2="546" y2="209" marker-end="url(#cbmd-flow-ahc)"/>
+<text class="ctxlbl" x="586" y="202" text-anchor="middle">split</text>
+<line class="dash" x1="626" y1="293" x2="546" y2="293" marker-end="url(#cbmd-flow-ahc)"/>
+<text class="ctxlbl" x="586" y="286" text-anchor="middle">encode_text</text>
+<line class="dash" x1="626" y1="377" x2="546" y2="377" marker-end="url(#cbmd-flow-ahc)"/>
+<text class="ctxlbl" x="586" y="370" text-anchor="middle">teacher</text>
+<line class="dash" x1="626" y1="553" x2="546" y2="553" marker-end="url(#cbmd-flow-ahc)"/>
+<text class="ctxlbl" x="586" y="546" text-anchor="middle">inputs</text>
+<line class="dash" x1="626" y1="735" x2="546" y2="735" marker-end="url(#cbmd-flow-ahc)"/>
+<text class="ctxlbl" x="586" y="728" text-anchor="middle">inputs</text>
+<text class="ctxlbl" x="586" y="750" text-anchor="middle">parts</text>
+</svg>
