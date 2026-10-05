@@ -143,8 +143,8 @@ Kind-specific contracts:
   behaviour (as `cub_koh2020.yaml` does with `majority_vote: koh`, `generation: logits`), and
   record remaining gaps in the anchor's header comment. Never re-implement data loading, models,
   training loops or metrics that a registry already provides. If the paper needs something the
-  architecture can't express (e.g. fine-tuning the backbone, which the cached-feature design
-  rules out), stop and ask instead of building around it.
+  architecture can't express, stop and ask instead of building around it (backbone fine-tuning
+  was added this way, as `Backbone.trainable` + `training.finetune:`, after asking).
 - Analysis-only logic belongs in `analysis.py`, not in evaluators; evaluators produce per-run
   numbers only.
 - Experiment settings belong in YAML under `configs/`, not as changed defaults in code (which

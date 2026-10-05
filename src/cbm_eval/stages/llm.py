@@ -62,7 +62,7 @@ class ClaudeClient:
         if response.stop_reason == "max_tokens":
             raise RuntimeError(f"Concept discovery response was cut off at max_tokens={self.max_tokens}; raise "
                                f"`max_tokens` on the llm/vlm discovery stage (a partial list is not cached)")
-        text ="".join(b.text for b in response.content if b.type == "text")
+        text = "".join(b.text for b in response.content if b.type == "text")
         if self.cache:
             self.cache.set(key, text)
         return text
