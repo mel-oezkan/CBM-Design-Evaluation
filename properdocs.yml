@@ -3,10 +3,15 @@ site_description: A controlled design study of concept bottleneck models
 repo_url: https://github.com/mel-oezkan/CBM-Design-Evaluation
 edit_uri: edit/main/docs/
 docs_dir: docs
+exclude_docs: overrides/   # theme templates, not pages
 
 theme:
   name: material
+  custom_dir: docs/overrides     # adds the section eyebrow above each page title
+  font: {text: IBM Plex Sans, code: IBM Plex Mono}
   features:
+    - navigation.tabs
+    - navigation.tabs.sticky
     - navigation.sections
     - navigation.top
     - content.code.copy
@@ -14,14 +19,23 @@ theme:
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
+      primary: custom
+      accent: custom
       toggle: {icon: material/brightness-7, name: Dark mode}
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
+      primary: custom
+      accent: custom
       toggle: {icon: material/brightness-4, name: Light mode}
+
+# Colours come from the repo's architecture diagram: lilac = stage modules, green = evaluation,
+# warm grey = infrastructure. Everything visual lives in this one stylesheet.
+extra_css: [stylesheets/extra.css]
 
 markdown_extensions:
   - admonition
   - attr_list
+  - md_in_html
   - tables
   - toc: {permalink: true}
   - pymdownx.highlight
@@ -52,19 +66,23 @@ plugins:
             show_if_no_docstring: true
             filters: ["!^_"]
 
+# Top-level entries are the header tabs: a first walkthrough, then one chapter each for how it
+# works, running studies, and extending the code.
 nav:
   - Home: index.md
-  - Architecture: architecture.md
-  - Configs: configs.md
-  - Component catalogue: components.md
-  - Guides:
+  - Getting started: getting-started.md
+  - Architecture:
+      - Overview: architecture.md
+      - Component catalogue: components.md
       - Data: data.md
       - Metrics: metrics.md
+  - Experiments:
+      - Configs and sweeps: configs.md
       - Instance bags (SEG-MIL-CBM): instance-bags.md
       - Part localization (CUB): part-localization.md
-  - Reproductions:
-      - Koh et al. 2020: koh2020_reproduction.md
-  - Contributing: contributing.md
+      - "Reproduction: Koh et al. 2020": koh2020_reproduction.md
+  - Extending:
+      - Contributing: contributing.md
   - API reference:
       - Core: api/core.md
       - Stage interfaces: api/stages.md

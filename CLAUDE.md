@@ -91,7 +91,7 @@ Steps:
    `configs/` if the variant is part of the study. The class docstring and constructor signature
    are the variant's entry in the docs' component catalogue (`scripts/gen_component_docs.py`).
 
-The docs pages under `docs/` include sections of `README.md` and this file through snippet
+The docs pages under `docs/` include sections of `README.md` and `CLAUDE.md` through snippet
 section markers (HTML comments starting with `--8<--`); keep them when editing around them.
 
 Kind-specific contracts:
@@ -151,8 +151,9 @@ Kind-specific contracts:
   behaviour (as `cub_koh2020.yaml` does with `majority_vote: koh`, `generation: logits`), and
   record remaining gaps in the anchor's header comment. Never re-implement data loading, models,
   training loops or metrics that a registry already provides. If the paper needs something the
-  architecture can't express, stop and ask instead of building around it (backbone fine-tuning
-  was added this way, as `Backbone.trainable` + `training.finetune:`, after asking).
+  architecture can't express, stop and ask (open an issue to discuss the design) instead of
+  building around it; backbone fine-tuning was added this way, as `Backbone.trainable` +
+  `training.finetune:`.
 - Analysis-only logic belongs in `analysis.py`, not in evaluators; evaluators produce per-run
   numbers only.
 - Experiment settings belong in YAML under `configs/`, not as changed defaults in code (which

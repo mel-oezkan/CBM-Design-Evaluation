@@ -1,0 +1,229 @@
+/* cbm-eval docs theme, layered on MkDocs Material.
+   Palette from the repo's architecture diagram: lilac = stage modules, green = evaluation,
+   warm grey = infrastructure; amber for warnings. Body/code fonts are set in properdocs.yml. */
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700&display=swap");
+
+:root {
+  --cbm-font-display: "IBM Plex Sans Condensed", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  --cbm-radius: 8px;
+}
+
+[data-md-color-scheme="default"] {
+  --cbm-bg: #F8F7F4; --cbm-surface: #FFFFFF; --cbm-ink: #1E1D24; --cbm-muted: #5D5B66; --cbm-line: #DCDAE2;
+  --cbm-stage-bg: #EEECFC; --cbm-stage-ink: #3C3489; --cbm-stage-line: #7268CC;
+  --cbm-eval-bg: #E1F3EC; --cbm-eval-ink: #0F5C45; --cbm-eval-line: #2E8A6A;
+  --cbm-infra-bg: #F1EFE9; --cbm-infra-ink: #2C2B28; --cbm-infra-line: #A39F95;
+  --cbm-warn-bg: #FDF3DC; --cbm-warn-ink: #7A4D00; --cbm-warn-line: #D9A441;
+  --cbm-accent: #4A3FB0; --cbm-code-bg: #F3F2F7;
+  --cbm-tok-kw: #5B2BB0; --cbm-tok-str: #0F6A4E; --cbm-tok-num: #A04B00; --cbm-tok-com: #7D7A87; --cbm-tok-fn: #1D52B5;
+}
+
+[data-md-color-scheme="slate"] {
+  --cbm-bg: #141319; --cbm-surface: #1C1B23; --cbm-ink: #ECEAF3; --cbm-muted: #A4A1B0; --cbm-line: #33313D;
+  --cbm-stage-bg: #252148; --cbm-stage-ink: #CBC5FF; --cbm-stage-line: #7E74E0;
+  --cbm-eval-bg: #11302A; --cbm-eval-ink: #91E2C3; --cbm-eval-line: #3FA582;
+  --cbm-infra-bg: #23222A; --cbm-infra-ink: #E7E4DB; --cbm-infra-line: #625F58;
+  --cbm-warn-bg: #3A2C0E; --cbm-warn-ink: #F3CF85; --cbm-warn-line: #9B7425;
+  --cbm-accent: #ADA4FF; --cbm-code-bg: #191820;
+  --cbm-tok-kw: #C3A6FF; --cbm-tok-str: #86D9B6; --cbm-tok-num: #F2B37A; --cbm-tok-com: #8C899A; --cbm-tok-fn: #8DB6FF;
+}
+
+/* Map the palette onto Material's variables (both schemes). */
+[data-md-color-scheme] {
+  --md-default-bg-color: var(--cbm-bg);
+  --md-default-fg-color: var(--cbm-ink);
+  --md-default-fg-color--light: var(--cbm-muted);
+  --md-default-fg-color--lighter: var(--cbm-muted);
+  --md-default-fg-color--lightest: var(--cbm-line);
+  --md-primary-fg-color: var(--cbm-accent);
+  --md-primary-fg-color--light: var(--cbm-accent);
+  --md-primary-fg-color--dark: var(--cbm-accent);
+  --md-primary-bg-color: var(--cbm-ink);          /* text on the (now light) header */
+  --md-primary-bg-color--light: var(--cbm-muted);
+  --md-accent-fg-color: var(--cbm-accent);
+  --md-typeset-color: var(--cbm-ink);
+  --md-typeset-a-color: var(--cbm-accent);
+  --md-typeset-table-color: var(--cbm-line);
+  --md-footer-bg-color: var(--cbm-surface);
+  --md-footer-bg-color--dark: var(--cbm-bg);
+  --md-footer-fg-color: var(--cbm-ink);
+  --md-footer-fg-color--light: var(--cbm-muted);
+  --md-footer-fg-color--lighter: var(--cbm-muted);
+  --md-code-bg-color: var(--cbm-code-bg);
+  --md-code-fg-color: var(--cbm-ink);
+  --md-code-hl-color: var(--cbm-accent);
+  --md-code-hl-color--light: color-mix(in srgb, var(--cbm-accent) 12%, transparent);
+  --md-code-hl-keyword-color: var(--cbm-tok-kw);
+  --md-code-hl-special-color: var(--cbm-tok-kw);
+  --md-code-hl-constant-color: var(--cbm-tok-kw);
+  --md-code-hl-string-color: var(--cbm-tok-str);
+  --md-code-hl-number-color: var(--cbm-tok-num);
+  --md-code-hl-comment-color: var(--cbm-tok-com);
+  --md-code-hl-function-color: var(--cbm-tok-fn);
+  --md-code-hl-name-color: var(--cbm-ink);
+  --md-code-hl-variable-color: var(--cbm-ink);
+  --md-code-hl-operator-color: var(--cbm-muted);
+  --md-code-hl-punctuation-color: var(--cbm-muted);
+  --md-code-hl-generic-color: var(--cbm-muted);
+}
+
+body { -webkit-font-smoothing: antialiased; }
+
+/* ---------- header and tabs: translucent page colour with a hairline, like a lab manual ---------- */
+.md-header, .md-tabs {
+  background-color: color-mix(in srgb, var(--cbm-bg) 92%, transparent);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  color: var(--cbm-ink);
+}
+.md-header, .md-header--shadow { box-shadow: none; border-bottom: 1px solid var(--cbm-line); }
+.md-header--shadow, .md-tabs { border-bottom: 1px solid var(--cbm-line); }
+.md-header:has(+ .md-container .md-tabs) { border-bottom: 0; }
+.md-header__topic:first-child { font-family: var(--md-code-font-family); font-weight: 600; }
+.md-tabs__link { font-size: .72rem; font-weight: 500; color: var(--cbm-muted); opacity: 1; margin-top: .6rem; }
+.md-tabs__link:hover, .md-tabs__item--active .md-tabs__link { color: var(--cbm-ink); }
+.md-tabs__item { height: 2.6rem; }
+.md-tabs__item--active { box-shadow: inset 0 -2px var(--cbm-accent); }
+@media screen and (min-width: 60em) {
+  .md-search__form { background-color: var(--cbm-code-bg); border: 1px solid var(--cbm-line); border-radius: 6px; }
+  .md-search__form:hover { background-color: var(--cbm-surface); }
+  .md-search__input { color: var(--cbm-ink); }
+  .md-search__input::placeholder, .md-search__icon { color: var(--cbm-muted); }
+}
+
+/* ---------- navigation ---------- */
+.md-nav__title { font-family: var(--cbm-font-display); }
+.md-nav__item--section > .md-nav__link {
+  font: 600 .6rem var(--md-code-font-family); text-transform: uppercase; letter-spacing: .07em; color: var(--cbm-muted);
+}
+.md-nav__link--active { font-weight: 600; }
+
+/* ---------- type ---------- */
+.md-typeset { line-height: 1.6; }
+.md-typeset h1, .md-typeset h2, .md-typeset h3, .md-typeset h4 {
+  font-family: var(--cbm-font-display); color: var(--cbm-ink); line-height: 1.15;
+  letter-spacing: -0.005em; text-wrap: balance;
+}
+.md-typeset h1 { font-size: 2.125em; font-weight: 700; margin-bottom: .6em; }
+.md-typeset h2 { font-size: 1.5em; font-weight: 600; margin-top: 2em; }
+.md-typeset h3 { font-size: 1.1875em; font-weight: 600; }
+.md-typeset h4 { font-size: 1em; font-weight: 600; }
+.md-typeset h1 + p { font-size: 1.1875em; line-height: 1.5; color: var(--cbm-muted); max-width: 72ch; }
+.md-typeset h2 + p, .md-typeset > p, .md-typeset > ul, .md-typeset > ol { max-width: 80ch; }
+.md-typeset hr { border-bottom-color: var(--cbm-line); }
+
+.cbm-eyebrow {
+  font: 600 .6rem var(--md-code-font-family); text-transform: uppercase; letter-spacing: .08em;
+  color: var(--cbm-muted); margin: 0 0 .5rem;
+}
+
+/* ---------- code ---------- */
+.md-typeset :not(pre) > code {
+  background: var(--cbm-code-bg); border: 1px solid var(--cbm-line); border-radius: 4px;
+  padding: .05em .35em; word-break: normal;
+}
+.md-typeset a code { color: var(--cbm-accent); }
+.md-typeset pre > code { border: 1px solid var(--cbm-line); border-radius: var(--cbm-radius); }
+.md-typeset .highlight span.filename {
+  font: 500 .64rem var(--md-code-font-family); color: var(--cbm-muted);
+  background: var(--cbm-code-bg); border: 1px solid var(--cbm-line); border-bottom: 0;
+  border-radius: var(--cbm-radius) var(--cbm-radius) 0 0;
+}
+.md-typeset .highlight span.filename + pre > code { border-top-left-radius: 0; border-top-right-radius: 0; }
+.md-typeset .highlight .c, .md-typeset .highlight .c1, .md-typeset .highlight .cm { font-style: italic; }
+.md-clipboard { color: var(--cbm-muted); }
+
+/* ---------- tables: hairline frame, mono uppercase headers ---------- */
+.md-typeset table:not([class]) {
+  border: 1px solid var(--cbm-line); border-radius: var(--cbm-radius);
+  background: var(--cbm-surface); font-size: .7rem;
+}
+.md-typeset table:not([class]) th {
+  font: 600 .58rem var(--md-code-font-family); text-transform: uppercase; letter-spacing: .06em;
+  color: var(--cbm-muted); background: var(--cbm-code-bg); white-space: nowrap;
+  border-bottom: 1px solid var(--cbm-line);
+}
+.md-typeset table:not([class]) td { border-top: 1px solid var(--cbm-line); vertical-align: top; }
+.md-typeset table:not([class]) tr:first-child td { border-top: 0; }
+.md-typeset table:not([class]) tbody tr:hover { background: color-mix(in srgb, var(--cbm-stage-bg) 45%, transparent); box-shadow: none; }
+
+/* ---------- admonitions as callouts: lilac by default, green for tips, amber for warnings ----------
+   The [class] selectors match Material's per-type rules in specificity, so these win by order. */
+.md-typeset :is(.admonition, details)[class] {
+  --cbm-c-bg: var(--cbm-stage-bg); --cbm-c-ink: var(--cbm-stage-ink); --cbm-c-line: var(--cbm-stage-line);
+  background: var(--cbm-c-bg); color: var(--cbm-c-ink);
+  border: 1px solid var(--cbm-c-line); border-radius: var(--cbm-radius); box-shadow: none; font-size: .72rem;
+}
+.md-typeset :is(.admonition, details):is(.tip, .hint, .important, .success, .check, .done) {
+  --cbm-c-bg: var(--cbm-eval-bg); --cbm-c-ink: var(--cbm-eval-ink); --cbm-c-line: var(--cbm-eval-line);
+}
+.md-typeset :is(.admonition, details):is(.warning, .caution, .attention, .danger, .error, .failure, .fail, .missing, .bug) {
+  --cbm-c-bg: var(--cbm-warn-bg); --cbm-c-ink: var(--cbm-warn-ink); --cbm-c-line: var(--cbm-warn-line);
+}
+.md-typeset [class] > :is(.admonition-title, summary) {
+  background: transparent; border: 0; font-family: var(--cbm-font-display); font-weight: 600; font-size: 1.05em;
+}
+.md-typeset [class] > :is(.admonition-title, summary)::before { background-color: currentColor; }
+.md-typeset :is(.admonition, details) :not(pre) > code { background: transparent; border-color: var(--cbm-c-line); color: inherit; }
+
+/* ---------- cards (``<div class="grid cards" markdown>``) ---------- */
+.md-typeset .grid.cards { grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr)); }
+.md-typeset .grid.cards > :is(ul, ol) > li, .md-typeset .grid > .card {
+  background: var(--cbm-surface); border: 1px solid var(--cbm-line); border-radius: 12px; padding: .8rem;
+}
+.md-typeset .grid.cards > :is(ul, ol) > li:hover, .md-typeset .grid > .card:hover {
+  border-color: var(--cbm-stage-line); box-shadow: none;
+}
+.md-typeset .grid.cards > :is(ul, ol) > li > p:first-child strong { font-family: var(--cbm-font-display); font-size: 1.1em; }
+.md-typeset .grid.cards > :is(ul, ol) > li > hr { margin: .4rem 0; }
+.md-typeset .grid.cards > :is(ul, ol) > li > p { color: var(--cbm-muted); }
+.md-typeset .grid.cards > :is(ul, ol) > li > p:first-child { color: var(--cbm-ink); }
+
+/* ---------- pipeline map (docs/architecture.md) ---------- */
+.cbm-map { display: grid; gap: 10px; margin: 1.5em 0; }
+.cbm-map p { margin: 0; }
+.cbm-row { display: grid; gap: 10px; }
+.cbm-row > p { display: contents; }               /* md_in_html wraps the links in a <p> */
+.cbm-inputs { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.cbm-stages { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; counter-reset: st; }
+.cbm-evals { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
+.cbm-tail { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: stretch; }
+@media (max-width: 600px) {
+  .cbm-inputs, .cbm-stages { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cbm-tail { grid-template-columns: minmax(0, 1fr); }
+  .cbm-tail .cbm-h-arrow { display: none; }
+}
+.md-typeset a.cbm-node {
+  display: grid; gap: 2px; align-content: start; min-width: 0; text-decoration: none;
+  color: var(--cbm-infra-ink); background: var(--cbm-infra-bg);
+  border: 1px solid var(--cbm-infra-line); border-radius: var(--cbm-radius); padding: 10px 12px;
+  transition: transform .12s ease, box-shadow .12s ease;
+}
+.md-typeset a.cbm-node:hover { transform: translateY(-1px); box-shadow: 0 0 0 2px var(--cbm-accent); }
+.md-typeset a.cbm-node:focus-visible { outline: 2px solid var(--cbm-accent); outline-offset: 2px; }
+.md-typeset a.cbm-node strong { font: 600 .75rem var(--cbm-font-display); }
+.md-typeset a.cbm-node span { font-size: .62rem; line-height: 1.35; color: var(--cbm-muted); }
+.md-typeset a.cbm-node code { font-size: .95em; color: inherit; }
+.md-typeset a.cbm-optional { border-style: dashed; }
+.md-typeset a.cbm-center { text-align: center; justify-items: center; }
+.md-typeset a.cbm-stage { background: var(--cbm-stage-bg); border-color: var(--cbm-stage-line); color: var(--cbm-stage-ink); }
+.md-typeset a.cbm-eval { background: var(--cbm-eval-bg); border-color: var(--cbm-eval-line); color: var(--cbm-eval-ink); }
+.md-typeset a:is(.cbm-stage, .cbm-eval) span { color: inherit; opacity: .82; }
+.md-typeset a.cbm-stage strong::before {
+  counter-increment: st; content: counter(st) "  ";
+  font: 500 .6rem var(--md-code-font-family); opacity: .7; white-space: pre;
+}
+.md-typeset a.cbm-stage .cbm-io { font: .56rem var(--md-code-font-family); opacity: .9; margin-top: 4px; overflow-wrap: anywhere; }
+.cbm-arrow { height: 18px; display: grid; place-items: center; color: var(--cbm-infra-line); }
+.cbm-arrow::before { content: ""; width: 1px; height: 100%; background: currentColor; }
+.cbm-h-arrow { display: grid; place-items: center; color: var(--cbm-muted); font-family: var(--md-code-font-family); }
+.cbm-band { border: 1px dashed var(--cbm-infra-line); border-radius: 12px; padding: 12px; display: grid; gap: 10px; }
+.cbm-band-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: .65rem; color: var(--cbm-muted); }
+.cbm-band-head b { font: 600 .7rem var(--cbm-font-display); color: var(--cbm-ink); }
+.cbm-map-note { font-size: .65rem; color: var(--cbm-muted); }
+
+/* ---------- detailed diagrams (docs/assets/*.svg, inlined via snippets so they follow the theme) ---------- */
+.cbm-figure { margin: 1.5em 0; padding: 12px; overflow-x: auto; background: var(--cbm-surface);
+  border: 1px solid var(--cbm-line); border-radius: var(--cbm-radius); }
+.cbm-figure svg { display: block; width: 100%; min-width: 640px; }
+
+@media (prefers-reduced-motion: reduce) { .md-typeset a.cbm-node { transition: none; } }

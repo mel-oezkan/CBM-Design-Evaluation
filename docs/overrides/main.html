@@ -1,0 +1,7 @@
+{#- Section name ("Architecture", "Experiments", ...) as a small eyebrow above the page title. -#}
+{% extends "base.html" %}
+
+{% block content %}
+  {% if page.parent %}<div class="cbm-eyebrow">{{ page.parent.title }}</div>{% endif %}
+  {{ super() }}
+{% endblock %}

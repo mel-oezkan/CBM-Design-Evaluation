@@ -127,6 +127,3 @@ def render() -> str:
 with mkdocs_gen_files.open("components.md", "w") as f:
     f.write(render())
 mkdocs_gen_files.set_edit_path("components.md", "scripts/gen_component_docs.py")
-
-with mkdocs_gen_files.open("assets/architecture.png", "wb") as f:
-    f.write((ROOT / "cbm_research_code_architecture.png").read_bytes())

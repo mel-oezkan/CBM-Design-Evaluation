@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="cbmd" viewBox="0 0 924 272" role="img" aria-labelledby="cbmd-fwd-title cbmd-fwd-desc">
+<title id="cbmd-fwd-title">CBM forward pass</title>
+<desc id="cbmd-fwd-desc">Forward pass of a trained CBM: input features x are normalized, a linear layer gives K concept logits, activate applies a sigmoid for binary targets, an optional intervention replaces concepts with given values, represent turns the concepts into the predictor input, and the head maps that representation plus the normalized features (and the bag mask, for instance bags) to class logits. Alignment owns the meaning of the linear layer, Generation owns represent, Predictor owns the head.</desc>
+<style>
+.cbmd { --fg: var(--cbm-ink, #1E1D24); --muted: var(--cbm-muted, #5D5B66); --line: var(--cbm-infra-line, #A39F95);
+  --surface: var(--cbm-surface, #FFFFFF); --infra: var(--cbm-infra-bg, #F1EFE9); --stage: var(--cbm-stage-bg, #EEECFC);
+  --stage-line: var(--cbm-stage-line, #7268CC); --eval: var(--cbm-eval-bg, #E1F3EC); --eval-line: var(--cbm-eval-line, #2E8A6A);
+  --accent: var(--cbm-accent, #4A3FB0);
+  --sans: var(--md-text-font-family, "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif);
+  --mono: var(--md-code-font-family, "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  color: var(--line); max-width: 100%; height: auto; }
+/* Standalone (README image): no site variables, so follow the OS theme. Inline in the docs, the
+   --cbm-* tokens from stylesheets/extra.css follow the theme toggle instead. */
+@media (prefers-color-scheme: dark) { .cbmd:root { --fg: #ECEAF3; --muted: #A4A1B0; --line: #625F58; --surface: #1C1B23;
+  --infra: #23222A; --stage: #252148; --stage-line: #7E74E0; --eval: #11302A; --eval-line: #3FA582; --accent: #ADA4FF; } }
+.cbmd .plain { fill: var(--infra); stroke: var(--line); stroke-width: 1; }
+.cbmd .box { fill: var(--stage); stroke: var(--stage-line); stroke-width: 1; }
+.cbmd .opt { fill: var(--surface); stroke: var(--line); stroke-width: 1; stroke-dasharray: 4 3; }
+.cbmd .t { fill: var(--fg); font: 600 14px var(--sans); }
+.cbmd .s { fill: var(--muted); font: 11.5px var(--mono); }
+.cbmd .xs { fill: var(--muted); font: 10.5px var(--mono); }
+.cbmd .lbl { fill: var(--accent); font: 11px var(--mono); }
+.cbmd .own { fill: var(--accent); font: 600 11.5px var(--mono); }
+.cbmd .edge { stroke: var(--line); stroke-width: 1.3; fill: none; }
+.cbmd .dot { stroke: var(--line); stroke-width: 1.3; stroke-dasharray: 3 3; fill: none; }
+.cbmd .bracket { stroke: var(--accent); stroke-width: 1.2; fill: none; }
+.cbmd .mk { fill: var(--line); }
+</style>
+<defs>
+<marker id="cbmd-fwd-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk" d="M0,0 L10,5 L0,10 z"/></marker>
+</defs>
+<!-- which stage owns which part -->
+<path class="bracket" d="M232,58 v-8 h236 v8"/>
+<text class="own" x="350" y="40" text-anchor="middle">Alignment: W init · frozen · target_type</text>
+<path class="bracket" d="M620,58 v-8 h112 v8"/>
+<text class="own" x="676" y="40" text-anchor="middle">Generation</text>
+<path class="bracket" d="M752,58 v-8 h128 v8"/>
+<text class="own" x="816" y="40" text-anchor="middle">Predictor</text>
+<!-- boxes -->
+<rect class="plain" x="8" y="70" width="80" height="56" rx="7"/>
+<text class="t" x="48" y="94" text-anchor="middle">x</text>
+<text class="s" x="48" y="112" text-anchor="middle">(N,[M,]D)</text>
+<line class="edge" x1="88" y1="98" x2="106" y2="98" marker-end="url(#cbmd-fwd-ah)"/>
+<rect class="box" x="108" y="70" width="104" height="56" rx="7"/>
+<text class="t" x="160" y="94" text-anchor="middle">normalize</text>
+<text class="s" x="160" y="112" text-anchor="middle">(x − μ) / σ</text>
+<line class="edge" x1="212" y1="98" x2="230" y2="98" marker-end="url(#cbmd-fwd-ah)"/>
+<rect class="box" x="232" y="70" width="112" height="56" rx="7"/>
+<text class="t" x="288" y="94" text-anchor="middle">linear W</text>
+<text class="s" x="288" y="112" text-anchor="middle">D → K logits</text>
+<line class="edge" x1="344" y1="98" x2="362" y2="98" marker-end="url(#cbmd-fwd-ah)"/>
+<rect class="box" x="364" y="70" width="104" height="56" rx="7"/>
+<text class="t" x="416" y="94" text-anchor="middle">activate</text>
+<text class="s" x="416" y="112" text-anchor="middle">σ if binary</text>
+<line class="edge" x1="468" y1="98" x2="486" y2="98" marker-end="url(#cbmd-fwd-ah)"/>
+<rect class="opt" x="488" y="70" width="112" height="56" rx="7"/>
+<text class="t" x="544" y="94" text-anchor="middle">intervene</text>
+<text class="s" x="544" y="112" text-anchor="middle">optional</text>
+<line class="edge" x1="600" y1="98" x2="618" y2="98" marker-end="url(#cbmd-fwd-ah)"/>
+<rect class="box" x="620" y="70" width="112" height="56" rx="7"/>
+<text class="t" x="676" y="94" text-anchor="middle">represent</text>
+<text class="s" x="676" y="112" text-anchor="middle">ĉ · CEM · 0/1</text>
+<line class="edge" x1="732" y1="98" x2="750" y2="98" marker-end="url(#cbmd-fwd-ah)"/>
+<rect class="box" x="752" y="70" width="128" height="56" rx="7"/>
+<text class="t" x="816" y="94" text-anchor="middle">head</text>
+<text class="s" x="816" y="112" text-anchor="middle">rep, x_norm, bag</text>
+<line class="edge" x1="880" y1="98" x2="902" y2="98" marker-end="url(#cbmd-fwd-ah)"/>
+<text class="lbl" x="908" y="102">y</text>
+<!-- x_norm bypass -->
+<path class="edge" d="M160,126 V192 H816 V128" marker-end="url(#cbmd-fwd-ah)"/>
+<text class="lbl" x="486" y="185" text-anchor="middle">x_norm: residual adds a linear path on it; mil computes attention from it</text>
+<!-- concept predictions leave the layer -->
+<path class="dot" d="M544,126 V152 H500" marker-end="url(#cbmd-fwd-ah)"/>
+<text class="s" x="492" y="156" text-anchor="end">ĉ → concept loss, concept_scores, evaluators</text>
+<text class="xs" x="462" y="226" text-anchor="middle">Bags: every box broadcasts over M; the bag mask reaches only the head, which pools over M.</text>
+<text class="xs" x="462" y="244" text-anchor="middle">Training only picks which parameter groups get gradients and in what order:</text>
+<text class="xs" x="462" y="260" text-anchor="middle">concept_params(), rep_params(), head.phases() (concepts first, head first, or jointly).</text>
+</svg>
