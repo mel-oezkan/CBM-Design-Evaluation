@@ -155,8 +155,9 @@ class SegmentSource(InstanceSource):
         return out or [Segment((0.0, 0.0, float(w), float(h)), 0.0, -1, None)]
 
     def _segments(self, ctx, split: str, paths: list[str]) -> list[list[dict[str, Any]]]:
-        key = {"dataset": ctx.dataset.cache_key(), "split": split, "segmenter": self.segment_key(ctx)}
-        path = ctx.cache_dir / "segments" / ctx.dataset.name / f"{split}-{stable_hash(key)}.pt"
+        dataset, part = ctx.source(split)
+        key = {"dataset": dataset.cache_key(), "split": part, "segmenter": self.segment_key(ctx)}
+        path = ctx.cache_dir / "segments" / dataset.name / f"{part}-{stable_hash(key)}.pt"
         if path.exists():
             return torch.load(path, weights_only=False)
         self.prepare(ctx, split)
@@ -175,7 +176,7 @@ class SegmentSource(InstanceSource):
     # -- encoding -------------------------------------------------------------------------------
 
     def build(self, ctx, split):
-        paths = [s.image for s in ctx.dataset.samples(split)]
+        paths = [s.image for s in ctx.samples(split)]
         if not paths or not isinstance(paths[0], str):
             raise RuntimeError(f"`instances: {self.name}` needs a dataset with image files")
         records = self._segments(ctx, split, paths)
@@ -288,7 +289,7 @@ class GroundedSAM(SegmentSource):
 
     def prepare(self, ctx, split):
         concepts = _concepts(ctx)
-        n = len(ctx.dataset.samples(split))
+        n = len(ctx.samples(split))
         if self.top_k is None or self.top_k >= len(concepts):
             self._prompts = [list(range(len(concepts)))] * n
             return

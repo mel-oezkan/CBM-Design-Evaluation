@@ -67,7 +67,8 @@ class LeakageEvaluator(Evaluator):
         out["probe.hard_acc"] = float((hard(binarize(c_eval)).argmax(1) == y).float().mean())
         out["probe.soft_hard_gap"] = out["probe.soft_acc"] - out["probe.hard_acc"]
 
-        if ctx.dataset.n_attrs > 1 and fs.attrs is not None:
+        same_attrs = ctx.source(self.split)[0].n_attrs == ctx.dataset.n_attrs  # the probe is fit on training data
+        if ctx.dataset.n_attrs > 1 and fs.attrs is not None and same_attrs:
             attr_probe = fit_logistic(c_probe, pfs.attrs, ctx.dataset.n_attrs)
             out["probe.spurious_bacc"] = balanced_accuracy(attr_probe(c_eval), fs.attrs)
         return out

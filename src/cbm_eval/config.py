@@ -17,6 +17,13 @@ An anchor YAML fully specifies one run::
 Bag-based CBMs (SEG-MIL-CBM) add a top-level ``instances: {name: patches | grounded_sam | ...}``
 that turns each image into a set of instances. Without it each image is one feature vector.
 
+``eval_datasets: {alias: {name: ..., **kw}}`` adds test-only domains to a run. The model is trained
+on ``dataset`` alone; each alias names that dataset's ``test`` split, with classes and concepts matched
+to the training dataset's by name, and evaluators score it when listed in their splits::
+
+    eval_datasets: {paintings: {name: cub_paintings, root: data/cub_paintings}}
+    evaluation: [{name: shift, splits: [val, test, paintings]}]
+
 An ablation YAML points at an anchor and varies dotted keys::
 
     anchor: ../anchors/waterbirds_lfcbm.yaml
@@ -55,6 +62,7 @@ class ExperimentConfig:
     evaluation: list[dict[str, Any]] = field(default_factory=lambda: [{"name": "shift"}])
     teacher: dict[str, Any] | None = None
     instances: dict[str, Any] | None = None
+    eval_datasets: dict[str, dict[str, Any]] | None = None
     name: str = "experiment"
     seed: int = 0
     device: str = "auto"
@@ -79,7 +87,8 @@ class ExperimentConfig:
     def to_dict(self) -> dict[str, Any]:
         """A deep copy, so callers can mutate it without touching this config.
 
-        ``instances`` is left out when unset so configs written before it existed keep their run_id.
+        ``instances`` and ``eval_datasets`` are left out when unset so configs written before they
+        existed keep their run_id.
         """
         d = {
             "name": self.name,
@@ -95,6 +104,8 @@ class ExperimentConfig:
         }
         if self.instances is not None:
             d["instances"] = self.instances
+        if self.eval_datasets is not None:
+            d["eval_datasets"] = self.eval_datasets
         return copy.deepcopy(d)
 
     @property

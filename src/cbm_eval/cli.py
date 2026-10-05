@@ -1,4 +1,4 @@
-"""Command line: ``cbm-eval run|sweep|analyze|list``."""
+"""Command line: ``cbm-eval run|sweep|evaluate|analyze|list``."""
 
 from __future__ import annotations
 
@@ -6,12 +6,13 @@ import argparse
 import json
 import logging
 import sys
+from pathlib import Path
 
 import pandas as pd
 
 from . import analysis, registry
-from .config import load_ablation, load_config, parse_override
-from .pipeline import run, sweep
+from .config import load_ablation, load_config, load_yaml, parse_override
+from .pipeline import EVAL_KEYS, evaluate_saved, run, sweep
 from .results import ResultsStore
 
 
@@ -43,6 +44,20 @@ def cmd_sweep(args) -> None:
     ok = sum(s["status"] == "ok" for s in status)
     skipped = sum(s["status"] == "skipped" for s in status)
     print(f"{ok} ran, {skipped} skipped, {len(status) - ok - skipped} failed")
+
+
+def cmd_evaluate(args) -> None:
+    overrides = {}
+    if args.config:  # take the evaluation side of a config, e.g. an anchor that gained eval_datasets
+        spec = load_yaml(args.config)
+        overrides = {k: spec[k] for k in EVAL_KEYS if k in spec}
+    overrides |= _overrides(args.set)
+    for run_dir in args.run_dirs:
+        cfg = json.loads((Path(run_dir) / "config.json").read_text())
+        store = ResultsStore(args.results or cfg["paths"]["results"])
+        res = evaluate_saved(run_dir, overrides, store)
+        print(json.dumps({"run_dir": run_dir, "run_id": res.cfg.run_id, "seed": res.cfg.seed, **res.metrics},
+                         indent=1, default=float))
 
 
 def cmd_analyze(args) -> None:
@@ -88,6 +103,13 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--dry-run", action="store_true")
     s.add_argument("--force", action="store_true")
     s.set_defaults(func=cmd_sweep)
+
+    e = sub.add_parser("evaluate", help="evaluate saved runs again (e.g. on new eval_datasets) without retraining")
+    e.add_argument("run_dirs", nargs="+", help="run directories written by `run`/`sweep`, e.g. runs/<run_id>-s0")
+    e.add_argument("--config", help="YAML whose `evaluation:` and `eval_datasets:` replace the saved ones")
+    e.add_argument("--set", nargs="*", help="dotted overrides, e.g. eval_datasets.paintings={name: cub_paintings}")
+    e.add_argument("--results", help="results file to append to (default: the run's paths.results)")
+    e.set_defaults(func=cmd_evaluate)
 
     a = sub.add_parser("analyze", help="effects model and frontier over the results store")
     a.add_argument("--results", default="results/results.jsonl")

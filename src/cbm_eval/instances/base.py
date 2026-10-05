@@ -48,10 +48,11 @@ def load_instances(ctx: "Context", source: InstanceSource, split: str) -> Instan
         inst = source.build(ctx, split)
     else:
         teacher = ctx.teacher if ctx.teacher is not None and ctx.teacher is not ctx.backbone else None
-        key = {"dataset": ctx.dataset.cache_key(), "backbone": ctx.backbone.cache_key(),
+        dataset, part = ctx.source(split)
+        key = {"dataset": dataset.cache_key(), "backbone": ctx.backbone.cache_key(),
                "teacher": teacher.cache_key() if teacher is not None else None,
-               "source": source.cache_key(ctx), "split": split}
-        path = ctx.cache_dir / "instances" / ctx.dataset.name / f"{split}-{stable_hash(key)}.pt"
+               "source": source.cache_key(ctx), "split": part}
+        path = ctx.cache_dir / "instances" / dataset.name / f"{part}-{stable_hash(key)}.pt"
         if path.exists():
             inst = InstanceSplit(**torch.load(path, weights_only=False))
         else:
