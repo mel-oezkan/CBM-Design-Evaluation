@@ -10,11 +10,14 @@ Status, findings and costs are kept current at the top; the dated log is at the 
 | Step | State |
 |---|---|
 | Read paper + official code (github.com/yewsiang/ConceptBottleneck) | done |
-| Fidelity audit of `cbm_eval` vs. the paper / official code | done (findings below) |
-| Additions needed to run Koh's setup in `cbm_eval` (registered variants, opt-in kwargs) | done, tests green (86) |
-| Smoke run on Modal (anchor, joint, seed 1) | running |
-| Fidelity ladder R0–R3 × {independent, sequential, joint} × seeds 1–3 | pending |
-| Report (Table 1/2 + interventions) → `results/cub_koh2020/README.md` and below | pending |
+| Fidelity audit of `cbm_eval` vs. the paper / official code | done (findings F1–F10) |
+| Koh-specific options as registered variants / opt-in kwargs, per `CLAUDE.md` | done |
+| **End-to-end backbone fine-tuning** in the architecture (`finetune:`; user decision) | done, 107 tests green |
+| Anchors `configs/anchors/cub_koh2020{,_independent,_sequential}.yaml` (fine-tuned) | written |
+| Ablations `configs/ablations/cub_koh2020*.yaml` (frozen arm + fidelity factors) | written |
+| Fine-tuned anchors on Modal (3 schemes × seeds 1–3) | **waiting for user's go** |
+| Frozen ablations on Modal (42 runs) | **waiting for user's go** |
+| Report vs. Table 1 / 2 | pending |
 
 ## Targets (paper, CUB, mean ± 2 SD over 3 seeds)
 
@@ -26,83 +29,100 @@ Status, findings and costs are kept current at the top; the dated log is at the 
 
 ## How the reproduction maps onto `cbm_eval`
 
-Anchor: `configs/anchors/cub_koh2020.yaml`. Driver: `scripts/koh2020_modal.py`.
+Every run is a plain config executed by `cbm-eval run` / `cbm-eval sweep`.
+`scripts/koh2020_modal.py` only unpacks the data on Modal, calls the CLI and mirrors rows to W&B.
 
 | Koh et al. | `cbm_eval` |
 |---|---|
-| CUB, 112 class-level concepts, authors' 80/20 train/val split | `dataset: {name: cub, majority_vote: koh, split_dir: <CUB_processed/class_attr_data_10>}` |
-| Inception-v3 (ImageNet), **fine-tuned end to end** | `backbone: {name: inception}` — **frozen** (the pipeline only trains on cached features) |
+| CUB, 112 class-level concepts, authors' 80/20 train/val split | `dataset: {name: cub, majority_vote: koh, split_dir: data/CUB_processed/class_attr_data_10}` |
+| Inception-v3 (ImageNet), fine-tuned end to end, SGD, augmentation | `backbone: inception` + `training.finetune: {optimizer: sgd, lr, momentum: 0.9, weight_decay, batch_size: 64}` |
+| x→c: lr 0.01, wd 4e-5 | independent / sequential anchors |
+| joint: lr 0.001, wd 4e-4, loss ÷ (1 + λ·112) | joint anchor: lr 0.00047 (= 0.001 / 2.12, because our loss is not divided) |
 | Concepts = annotated attributes | `discovery: dataset`, `filtering: rules(max_words=10, remove_class_names=false)` (keeps all 112) |
 | Concept supervision | `alignment: human` |
 | Linear c → y | `predictor: dense` |
-| Independent: f trained on true c, tested on σ(ĝ(x)) | `training: independent[_weighted]`, `generation: scores` |
-| Sequential / joint: f on concept **logits** | `generation: logits` + `training: sequential[_weighted]` / `joint[_weighted]` |
+| Independent: f on true c, tested on σ(ĝ(x)) | `training: independent_weighted`, `generation: scores` |
+| Sequential / joint: f on concept **logits** | `generation: logits` + `sequential_weighted` / `joint_weighted` |
 | Concept BCE weighted by neg/pos ratio | `*_weighted` training variants |
-| Joint λ = 0.01 on a sum over 112 concepts | `concept_weight: 1.12` (our concept loss averages over concepts) |
-| Task error / concept error | `shift.test.acc` / new `concepts.test.concept_error` |
-| Test-time intervention (28 groups, visibility-aware) | `leakage.intervention.acc@f` (random individual concepts; approximate) |
+| Joint λ = 0.01 on a sum over 112 concepts | `concept_weight: 1.12` (our concept loss averages) |
+| Task error / concept error | `shift.test.acc` / `concepts.test.concept_error` |
+| Test-time intervention | `leakage.intervention.acc@f` (random single concepts; approximate) |
 
-**Fidelity ladder** (to attribute any gap): R0 = pipeline defaults; R1 = + Koh data;
-R2 = + logit-connected heads; R3 = + weighted BCE (= anchor). The remaining gap at R3 is expected
-to come mostly from the frozen backbone (plus optimizer differences: Adam with early stopping on
-cached features, versus Koh's SGD with augmentation for up to 1000 epochs).
+**Remaining gaps** (recorded in the anchor header): early stopping on val loss (ours) vs. up to
+1000 epochs on train+val selected by training accuracy (theirs); Adam for concept layer and head
+(ours) vs. SGD; no auxiliary Inception head; ImageNet normalization vs. their mean 0.5 / std 2;
+resize vs. center crop at eval; interventions on single concepts vs. visibility-aware groups.
+
+**Ablations** (`configs/ablations/cub_koh2020*.yaml`, frozen backbone via
+`overrides: {stages.training.finetune: null}`): OFAT removal of each Koh option — `majority_vote:
+mean`, no `split_dir`, `generation: scores` (sequential / joint), unweighted training.
+
+## How fine-tuning fits the architecture (design)
+
+- `Backbone.trainable` (class flag, default False) + `encoder()` (fresh trainable copy: images → (N, D))
+  + `train_transform()` (augmentation). `inception` and `toy` are trainable. Frozen feature caching is unchanged.
+- `training.finetune: {...}` (a frozen `Finetune` dataclass; unknown keys raise) on every training
+  variant. Default `None` keeps existing behaviour and run ids.
+- `PipelineBuilder.train` creates the encoder, passes it to `Training.fit(..., encoder=)`, then
+  `ctx.use_encoder(encoder)`. From then on `ctx.split()` / `ctx.inputs()` return the fine-tuned features
+  (in memory, run-specific), so `cache_scores` and every evaluator work unchanged. This is equivalent
+  to evaluating the end-to-end model. The encoder is reset at the start of every run.
+- Refused loudly: `finetune` with `instances:`, with patch-reading evaluators, or with a frozen-only backbone.
+- `TrainedCBM.encoder` is saved as `encoder.pt`.
+- Tests (`tests/test_finetune.py`): all schemes fine-tune and the encoder moves; evaluated inputs equal
+  the fine-tuned encoder's features; reused `Context` resets; refusals; unknown keys rejected.
 
 ## Reliability findings about `cbm_eval`
 
 | # | Finding | Severity | Status |
 |---|---|---|---|
-| F1 | `data/cub.py` says concepts are "majority-voted per class (as in Koh et al., 2020)", but it counts "not visible" annotations as negatives, votes over train+val, and has no tie rule. **Result: 93 concepts instead of 112** (19 missing). On the shared concepts, 4.5% of test labels differ from Koh's. | High for any CUB-CBM comparison with the literature | Opt-in fix `majority_vote: koh` (+ `split_dir`). Default unchanged to keep run ids/caches valid. Verified: **112 concepts, 100% identical labels and splits** vs. the authors' processed data. Docstring of the default still overclaims — suggest rewording. |
-| F2 | Sequential and joint heads always see **sigmoid probabilities** (`ScoreLayer` + `activate`). Koh et al. connect f to logits (their sigmoid variant is a separate, worse-for-accuracy model). There was no way to configure this. | Medium | New `generation: logits` variant. |
-| F3 | No imbalance-weighted concept loss. Koh weights each concept's BCE by its neg/pos ratio (~9:1 on average). | Medium (affects concept F1/error trade-off) | New `independent_weighted` / `sequential_weighted` / `joint_weighted`. |
-| F4 | No evaluator reports concept accuracy, so Table 2 cannot be computed from pipeline outputs. | Medium | New `evaluation: concepts` (error, F1, positive rate). |
-| F5 | No Inception-v3 backbone. | Low | New `backbone: inception`. |
-| F6 | The pipeline cannot fine-tune the backbone (by design: frozen, cached features). An exact numerical reproduction of Koh et al.'s CUB numbers is therefore out of reach. | Design limitation | Documented. Measured via the ladder. |
-| F7 | `leakage` interventions replace random individual concepts with ground truth. Koh intervene on concept *groups*, set invisible concepts to 0, and use 5th/95th-percentile logits for logit models. With `generation: logits`, an intervened 0/1 becomes ±logit(1−1e-6) ≈ ±13.8. | Low (evaluation-protocol difference) | Documented; curves are compared only qualitatively. |
-| F9 | Koh's imbalance weighting (F3) is a near no-op for a frozen linear concept layer trained with Adam: a constant per-concept loss scale is cancelled by Adam's per-parameter normalization (each concept owns one weight row). A weighted and an unweighted probe gave **identical** results to 4 decimals. It can only matter through coupling (joint) or with SGD. | Insight (not a bug) | Documented; the ladder measures it. |
-| F8 | `CUB(...)` reads every image header at construction (`_image_sizes`). On a network volume (Modal) this takes minutes, so the driver unpacks CUB to local disk first. | Low (performance) | Worked around. |
+| F1 | `data/cub.py` says concepts are "majority-voted per class (as in Koh et al.)", but it counts "not visible" as negatives, votes over train+val and has no tie rule → **93 concepts instead of 112**; 4.5% of shared test labels differ. | High for comparisons with the literature | Opt-in `majority_vote: koh` (+ `split_dir`). Verified **112/112 concepts, 100% identical labels and splits** vs. the authors' data. Default unchanged. The README no longer claims Koh-style voting for the default. |
+| F2 | Sequential and joint heads always saw sigmoid probabilities; Koh connect f to logits. | Medium | New `generation: logits`. |
+| F3 | No imbalance-weighted concept loss. | Medium | New `*_weighted` training variants. |
+| F4 | No evaluator for concept accuracy (Table 2). | Medium | New `evaluation: concepts`. |
+| F5 | No Inception-v3 backbone. | Low | New `backbone: inception` (lazy weights, cache-key tested). |
+| F6 | No backbone fine-tuning. Koh's numbers were unreachable: the frozen-feature ceiling is ≈ 0.37 task / ≈ 0.10 concept error. | Design limitation | **Added `finetune:`** (see design above). |
+| F7 | `leakage` interventions are random single concepts, not Koh's visibility-aware groups; with `logits`, an intervened 0/1 becomes ±13.8 rather than the 5th/95th-percentile logits. | Low | Documented. |
+| F8 | `CUB(...)` reads every image header at construction: minutes on a network volume. | Low (perf) | Worked around (local unpack). |
+| F9 | Imbalance weighting is a near no-op for a frozen linear concept layer under Adam (per-row loss scale cancels). Weighted and unweighted probes were identical to 4 decimals. | Insight | Ablation measures it. |
+| F10 | Feature caches are keyed by the full dataset key, so label-only options (`majority_vote`, `split_dir`) re-extract identical image features. | Low (perf) | Documented. |
+
+## Results so far (frozen backbone, pre-restructure; indicative only)
+
+| Config | Task error | Concept error |
+|---|---|---|
+| Joint, Koh data + logits + weighted (seed 1) | 0.466 | 0.122 |
+| Independent, Koh options (seeds 1–3) | 0.522 / 0.525 / 0.526 | — |
+| Independent, pipeline defaults (93 concepts; seeds 1–2) | 0.537 / 0.537 | 0.098 / 0.098 |
+| Linear probe on frozen features (outside pipeline) | 0.374 (x→y) | 0.103–0.114 |
 
 ## Costs (Modal)
 
 | When | What | Cost |
 |---|---|---|
-| 2026-10-05 | Data prep + first smoke attempt of the standalone port (stuck on slow volume reads, stopped) | ≈ $4.15 |
-| 2026-10-05 | Modular pipeline smoke + ladder | pending |
+| 2026-10-05 | Standalone port (now removed): data prep + stalled smoke run | $4.21 |
+| 2026-10-05 | Modular pipeline: smoke + partial frozen ladders | $0.37 |
+| **Total** | | **$4.59** (covered by credits, billed $0) |
 
-All of it is covered by credits so far (billed $0). Check with `uv run modal billing report --for today`.
-
-## Open problems / risks
-
-- **Frozen vs. fine-tuned backbone** (F6) dominates any remaining gap. With frozen ImageNet
-  features, CUB task error is expected to be well above the paper's 0.20–0.24. The interesting
-  checks are therefore (a) whether concept error lands near 0.03–0.05, (b) the *ordering*
-  (joint < independent ≈ sequential in task error), and (c) interventions improving accuracy.
-- Optional, if wanted: the standalone faithful port (`src/cbm_eval/repro/koh2020`,
-  `scripts/koh2020_reference_modal.py`) can produce reference numbers with fine-tuning. It costs about
-  3 A100-hours per model (~$60–80 for x→c + joint, 3 seeds). It is **not** part of the reliability
-  test and has not been run.
+**Estimate for the next step (not started):** fine-tuned anchors = 9 A100 runs. Each runs up to 300
+epochs with patience 30; at an estimated ~10–15 s per epoch, that is ~0.3–1 h, so **≈ $6–20** in
+total. The frozen ablations (42 runs, one L4) cost **≈ $1**. A 2-epoch benchmark first (≈ $0.3) would
+pin the epoch time down.
 
 ## Log
 
 ### 2026-10-05
 
-- Read the paper (Tables 1–2, App. A.2, B.2, B.3) and the official code. Found the authors' Codalab
-  artifacts still online (processed splits and training logs).
-- First wrote a standalone port of the official training code and smoke-tested it on Modal. The
-  smoke run stalled reading 12k JPEGs from the volume and was stopped (≈ $4).
-- **Pivot (per request): the reproduction must use the `cbm_eval` modules.** The port stays in
-  `src/cbm_eval/repro/koh2020` as an unrun reference, as `CLAUDE.md` allows.
-- Audited `cbm_eval` against Koh et al. → findings F1–F8. Added the minimal registered variants and
-  opt-in kwargs (defaults unchanged, per `CLAUDE.md`'s run-id rules), with tests. Suite: 86 passed.
-- Verified F1's fix against the authors' processed pickles: 112/112 concepts in order and identical
-  labels and split membership.
-- Created the W&B project `deep_cv/cbm-koh2020-modular` (Modal secret `wandb`). Launched a smoke run
-  of the anchor (R3 joint, seed 1) on an L4.
-- Smoke result (R3 joint, seed 1): **task error 0.466, concept error 0.122**, 112 concepts.
-  The pipeline ran end to end without errors.
-- Ceilings from the frozen features, measured outside the pipeline with simple Adam probes on the
-  same cached Inception features (authors' split):
-  - linear concept probe: test concept error **0.103–0.114**, so the pipeline's 0.122 is close to it;
-  - linear x→y probe, no bottleneck: test task error **0.374**.
-  - **Conclusion:** with a frozen backbone, the paper's 0.031 concept error and 0.20–0.24 task errors are
-    out of reach. The gap is the backbone, not the CBM stages.
-- Launched the full ladder (4 levels × 3 schemes × seeds 1–3), detached.
+- Read the paper and the official code. The authors' Codalab artifacts are still online (processed
+  splits, training logs, checkpoints).
+- Wrote a standalone port first. **Pivot (per request): the reproduction must use the `cbm_eval`
+  modules.** Port removed per the updated `CLAUDE.md`. Copy kept outside the repo.
+- Audited `cbm_eval` (F1–F10); added minimal registered variants / opt-in kwargs with tests.
+- Frozen-backbone smoke (joint, seed 1): task error 0.466, concept error 0.122 — at the frozen ceiling.
+- Seed check: independent seeds 1/2 gave identical task error. A synthetic test shows seeds do change
+  the heads, so this is near-deterministic convergence on 200 fixed concept codes, not a seeding bug.
+- Asked about fine-tuning (per `CLAUDE.md` "stop and ask"). **User chose: add true end-to-end
+  fine-tuning.** Implemented as designed above; 107 tests pass.
+- Restructured configs: fine-tuned anchors + frozen OFAT ablations. Modal glue split into parallel
+  per-(anchor, seed) runs with separate result files, plus one sequential ablation container.
+- **Waiting for the user's go before launching anything on Modal.**
