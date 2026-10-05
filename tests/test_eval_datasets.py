@@ -1,4 +1,4 @@
-"""Test-only domains (``eval_datasets:``)."""
+"""Test-only domains (``eval_datasets:``) and re-evaluating saved runs (``evaluate_saved``)."""
 
 import math
 
@@ -7,8 +7,9 @@ import torch
 
 from cbm_eval.context import Context
 from cbm_eval.data.synthetic import SyntheticDataset
-from cbm_eval.pipeline import PipelineBuilder, run
+from cbm_eval.pipeline import PipelineBuilder, evaluate_saved, run
 from cbm_eval.registry import DATASETS
+from cbm_eval.results import ResultsStore
 
 SMALL = {"sizes": {"train": 400, "val": 200, "test": 300}}  # as conftest's SMALL_DATA
 SHIFTED = {"name": "synthetic", **SMALL, "noise": 0.6, "background_strength": 1.0}
@@ -102,6 +103,61 @@ def test_dataset_misuse_is_refused(base_cfg):
         del DATASETS._items["_test_only"]
     with pytest.raises(ValueError, match="shadows"):
         PipelineBuilder(base_cfg.with_overrides({"eval_datasets": {"test": SHIFTED}}))
+
+
+@pytest.mark.parametrize("overrides", [
+    {},
+    {"stages.generation": {"name": "embeddings", "emb_dim": 4}},
+    {"stages.predictor": {"name": "residual"}},
+    {"stages.alignment": {"name": "weights"}},
+    {**HUMAN, "stages.training": {"name": "joint", "epochs": 10}},
+    {**HUMAN, "stages.training": {"name": "joint", "epochs": 3, "finetune": {"epochs": 2, "lr": 0.05, "batch_size": 32, "num_workers": 0}},
+     "evaluation": [{"name": "shift"}, {"name": "concepts"}]},  # the fine-tuned encoder is reloaded
+    {"instances": {"name": "patches"}, "stages.predictor": {"name": "mil"},
+     "stages.training": {"name": "joint", "epochs": 10}},
+])
+def test_saved_run_evaluates_identically(base_cfg, overrides):
+    cfg = base_cfg.with_overrides(overrides)
+    res = run(cfg)
+    again = evaluate_saved(res.run_dir)
+    assert again.cfg.run_id == cfg.run_id
+    for k, v in res.metrics.items():
+        assert again.metrics[k] == pytest.approx(v, abs=1e-5), k
+
+
+def test_saved_run_gains_eval_datasets_without_retraining(base_cfg):
+    store = ResultsStore(base_cfg.paths["results"])
+    res = run(base_cfg, store)
+    new = {"eval_datasets": {"shifted": SHIFTED}, "evaluation": [{"name": "shift", "splits": ["test", "shifted"]}]}
+    again = evaluate_saved(res.run_dir, new, store)
+    assert again.metrics["shift.test.acc"] == pytest.approx(res.metrics["shift.test.acc"])
+    assert "shift.shifted.acc" in again.metrics
+    assert store.has(base_cfg.with_overrides(new).run_id, base_cfg.seed)
+    row = store._rows()[-1]
+    assert row["evaluated_from"] == str(res.run_dir)
+    assert row["concept_trace"] == dict(res.concept_trace)  # the training run's trace, read from run_dir
+
+
+def test_evaluate_refuses_model_changes(base_cfg):
+    res = run(base_cfg.with_overrides({"evaluation": [{"name": "shift"}]}))
+    with pytest.raises(ValueError, match=r"may only change.*\['stages'\]"):
+        evaluate_saved(res.run_dir, {"stages.predictor.lam": 0.1})
+
+
+def test_cli_evaluate_takes_eval_keys_from_a_config(base_cfg, tmp_path, capsys):
+    import json
+
+    import yaml
+
+    from cbm_eval.cli import main
+
+    res = run(base_cfg.with_overrides({"evaluation": [{"name": "shift"}]}))
+    spec = {**base_cfg.to_dict(), "stages": {}, "eval_datasets": {"shifted": SHIFTED},
+            "evaluation": [{"name": "shift", "splits": ["shifted"]}]}
+    (tmp_path / "anchor.yaml").write_text(yaml.safe_dump(spec))
+    main(["evaluate", str(res.run_dir), "--config", str(tmp_path / "anchor.yaml")])
+    out = json.loads(capsys.readouterr().out)
+    assert "shift.shifted.acc" in out and out["run_id"] != base_cfg.run_id
 
 
 def test_cub_class_concepts_match_its_image_labels(cub_root):

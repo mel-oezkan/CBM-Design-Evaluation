@@ -36,6 +36,7 @@ uv run cbm-eval run configs/anchors/synthetic.yaml --set stages.predictor.lam=0.
 uv run cbm-eval sweep configs/ablations/synthetic_stages.yaml --dry-run              # list the runs
 uv run cbm-eval sweep configs/ablations/synthetic_stages.yaml                        # run them
 uv run cbm-eval analyze --results results/synthetic.jsonl --metric shift.test.wga --frontier leakage.intervention.gain
+uv run cbm-eval evaluate runs/synthetic/<run_id>-s0 --config configs/anchors/synthetic.yaml  # re-score, no retraining
 ```
 
 The synthetic anchor needs no data, weights or network access and finishes in about a second;
@@ -198,7 +199,16 @@ in the training dataset. An eval dataset without its own concept annotations inh
 dataset's class-level ones (`class_concepts()`, e.g. CUB's majority-voted attributes). A test-only
 dataset cannot be used as `dataset:`.
 
-`eval_datasets` is part of the `run_id`.
+`eval_datasets` is part of the `run_id`. To score runs that are already trained on a new domain, add
+it to the anchor and re-evaluate the saved runs instead of retraining:
+
+```bash
+uv run cbm-eval evaluate runs/<run_id>-s0 runs/<run_id>-s1 --config configs/anchors/cub_human.yaml
+```
+
+`evaluate` takes `evaluation:` and `eval_datasets:` from `--config` (plus any `--set` overrides) and
+refuses any change that would alter the model. It appends the row that `run` would write for the new
+config, marked with `evaluated_from`, so a later `sweep` of that config skips it.
 <!-- --8<-- [end:configs] -->
 
 ## Adding a component
