@@ -32,6 +32,7 @@ class TrainedCBM:
     config: dict[str, Any]
     train_log: dict[str, float] = field(default_factory=dict)
     concept_scores: dict[str, torch.Tensor] = field(default_factory=dict)
+    encoder: nn.Module | None = None  # fine-tuned image encoder (training ``finetune:``); inputs are its features
 
     @property
     def concepts(self) -> ConceptSet:
@@ -65,6 +66,8 @@ class TrainedCBM:
         run_dir.mkdir(parents=True, exist_ok=True)
         torch.save(self.model.state_dict(), run_dir / "model.pt")
         torch.save(self.concept_scores, run_dir / "concept_scores.pt")
+        if self.encoder is not None:
+            torch.save(self.encoder.state_dict(), run_dir / "encoder.pt")
         if self.concepts.vectors is not None:
             torch.save(self.concepts.vectors, run_dir / "concept_vectors.pt")
         (run_dir / "concepts.json").write_text(json.dumps(self.concepts.to_json(), indent=1))

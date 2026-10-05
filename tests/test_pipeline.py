@@ -111,3 +111,40 @@ def test_sweep_skips_existing_and_records_failures(base_cfg):
     assert sweep([cheap], store, save=False)[0]["status"] == "skipped"
     assert len(store.load()) == 1
     assert len(store.load(include_failed=True)) == 2
+
+
+HUMAN = {"stages.alignment": {"name": "human"}}
+
+
+@pytest.mark.parametrize("overrides", [
+    {"stages.generation": {"name": "logits"}},
+    {"stages.generation": {"name": "logits"}, "stages.training": {"name": "joint_weighted", "epochs": 20}},
+    {"stages.training": {"name": "sequential_weighted", "epochs": 20}},
+    {"stages.training": {"name": "independent_weighted", "epochs": 20}},
+])
+def test_koh2020_variants_run(base_cfg, overrides):
+    cfg = base_cfg.with_overrides({**HUMAN, **overrides,
+                                   "evaluation": [{"name": "shift"}, {"name": "concepts"}, {"name": "leakage"}]})
+    res = run(cfg, save=False)
+    m = res.metrics
+    assert _ok(m), m
+    assert m["shift.test.acc"] > 0.4
+    assert 0 <= m["concepts.test.concept_error"] < 0.5 and 0 < m["concepts.test.concept_f1"] <= 1
+
+
+def test_logits_generation_feeds_logits():
+    from cbm_eval.stages.base import AlignedConcepts
+    from cbm_eval.stages.generation import LogitScores
+    from cbm_eval.structures import ConceptSet
+
+    layer = LogitScores().build(8, AlignedConcepts(ConceptSet(["a", "b", "c"]), target_type="binary"))
+    x = torch.randn(5, 8)
+    c_hat, rep = layer(x)
+    assert torch.allclose(rep, layer.concept_logits(x), atol=1e-4)
+    assert torch.all((c_hat >= 0) & (c_hat <= 1))
+
+
+def test_weighted_training_refuses_continuous_targets(base_cfg):
+    cfg = base_cfg.with_overrides({"stages.training": {"name": "joint_weighted", "epochs": 2}})
+    with pytest.raises(ValueError, match="binary image-level concept targets"):
+        run(cfg, save=False)

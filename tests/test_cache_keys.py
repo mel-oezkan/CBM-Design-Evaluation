@@ -3,11 +3,15 @@ listed as exempt with a reason. A new argument fails this test until that choice
 cache can't silently serve results computed under different settings."""
 
 import inspect
+import pickle
+import shutil
 from types import SimpleNamespace
 
 import pytest
 
+from cbm_eval.backbones.inception import InceptionBackbone
 from cbm_eval.backbones.toy import ToyBackbone
+from cbm_eval.data.cub import CUB
 from cbm_eval.data.metashift import MetaShift
 from cbm_eval.data.synthetic import SyntheticDataset
 from cbm_eval.data.waterbirds import Waterbirds
@@ -51,6 +55,8 @@ CASES = {
     "toy": (ToyBackbone, lambda **kw: ToyBackbone(**kw), lambda o: o.cache_key(),
             {"latent_dim": 32, "dim": 64, "seed": 1},
             {"grid": "patch_grid metadata only; patch features come from the synthetic dataset"}),
+    "inception": (InceptionBackbone, lambda **kw: InceptionBackbone(**kw), lambda o: o.cache_key(),
+                  {"weights": None, "image_size": 331}, {}),  # weights load lazily, so nothing is downloaded
     "grounding_dino": (GroundingDINOScorer, lambda **kw: GroundingDINOScorer(**kw), lambda o: o.cache_key(),
                        {"model": "IDEA-Research/grounding-dino-base", "box_threshold": 0.4, "concepts_per_prompt": 4},
                        {"batch_size": BATCHING["batch_size"]}),
@@ -89,3 +95,24 @@ def test_dataset_root_is_keyed(tmp_path, cls, header, exempt):
     a = cls(root=_metadata(tmp_path / "a", header)).cache_key()
     b = cls(root=_metadata(tmp_path / "b", header)).cache_key()
     assert a != b
+
+
+def test_cub_keys_cover_features_and_parts(tmp_path, cub_root):
+    """CUB feeds two caches: features (``cache_key``) and part annotations (``part_spec().cache_key``)."""
+    segs = shutil.copytree(cub_root / "part_segmentations" / "AnnotationMasksPerclass", tmp_path / "segs")
+    split_dir = tmp_path / "koh_split"
+    split_dir.mkdir()
+    with open(split_dir / "val.pkl", "wb") as f:  # Koh et al.'s format; image 1 is in the official train split
+        pickle.dump([{"img_path": "CUB_200_2011/images/002.B_bird/B_bird_0001.jpg"}], f)
+    perturbed = {"root": str(shutil.copytree(cub_root, tmp_path / "copy" / "CUB_200_2011")),
+                 "class_level_concepts": False, "min_class_count": 2, "val_fraction": 0.3,
+                 "part_segmentations": str(segs), "majority_vote": "koh", "split_dir": str(split_dir)}
+    assert init_params(CUB) == set(perturbed)
+
+    def key(**kw):
+        ds = CUB(**{"root": str(cub_root), "min_class_count": 1, **kw})
+        return {"data": ds.cache_key(), "parts": ds.part_spec().cache_key()}
+
+    base = key()
+    for name, value in perturbed.items():
+        assert key(**{name: value}) != base, f"CUB({name}=...) does not change a cache key"

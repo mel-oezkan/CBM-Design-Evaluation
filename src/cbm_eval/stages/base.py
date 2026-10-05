@@ -188,8 +188,17 @@ class Predictor(ABC):
 
 
 class Training(ABC):
-    """Fits the concept layer and predictor head; returns a log of training metrics."""
+    """Fits the concept layer and predictor head; returns a log of training metrics.
+
+    ``trains_backbone``: when True, ``PipelineBuilder`` passes ``encoder`` (a trainable copy of the
+    backbone's image encoder, see ``Backbone.encoder``) and the stage fits it end to end on images
+    from ``ctx.image_split``; afterwards the run's inputs are that encoder's features.
+    ``num_workers`` is the dataloader width for those images.
+    """
+
+    trains_backbone: bool = False
+    num_workers: int = 0
 
     @abstractmethod
     def fit(self, layer: ConceptLayer, head: PredictorHead, aligned: AlignedConcepts,
-            ctx: "Context") -> dict[str, float]: ...
+            ctx: "Context", encoder: nn.Module | None = None) -> dict[str, float]: ...
