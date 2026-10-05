@@ -57,8 +57,9 @@ class TrainedCBM:
         c_hat = self.predict(x, bag=bag)[1]
         return bag.max(c_hat) if bag is not None and c_hat.dim() == 3 else c_hat
 
-    def cache_scores(self, ctx, splits=("train", "val", "test")) -> None:
-        for s in splits:
+    def cache_scores(self, ctx, splits: tuple[str, ...] | None = None) -> None:
+        """Image-level concept scores per split; by default for every split of the run (``ctx.splits``)."""
+        for s in ctx.splits if splits is None else splits:
             self.concept_scores[s] = self.image_concepts(*ctx.inputs(s))
 
     def save(self, run_dir: str | Path) -> Path:

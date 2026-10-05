@@ -11,6 +11,7 @@ from typing import Any
 from . import registry
 from .config import ExperimentConfig
 from .context import Context
+from .data.base import SPLITS
 from .model import CBM, TrainedCBM
 from .registry import (ALIGNMENT, BACKBONES, DATASETS, DISCOVERY, EVALUATION, FILTERING, GENERATION,
                        INSTANCES, PREDICTOR, TRAINING)
@@ -45,6 +46,7 @@ class PipelineBuilder:
         self.training = TRAINING.build(st["training"])
         self.evaluators = {e["name"]: EVALUATION.build(e) for e in cfg.evaluation}
         self.instances = INSTANCES.build(cfg.instances) if cfg.instances else None
+        self._check_datasets()
         if self.instances is not None and not self.predictor.supports_bags:
             raise ValueError(f"`instances: {cfg.instances['name']}` gives each image a bag of instances; "
                              f"use a bag-aware predictor such as {{name: mil}}, not '{st['predictor']['name']}'")
@@ -55,13 +57,26 @@ class PipelineBuilder:
                                  + ("`instances:`" if self.instances is not None else f"evaluators {patchy}")
                                  + " read frozen patch features; drop them or remove `finetune:`")
 
+    def _check_datasets(self) -> None:
+        name = self.cfg.dataset["name"]
+        if DATASETS.get(name).splits != SPLITS:
+            raise ValueError(f"Dataset '{name}' is test-only; train on its source dataset and add it under "
+                             f"`eval_datasets: {{<alias>: {{name: {name}, ...}}}}`")
+        for alias, spec in (self.cfg.eval_datasets or {}).items():
+            if alias in SPLITS:
+                raise ValueError(f"`eval_datasets.{alias}` shadows the training dataset's '{alias}' split; rename it")
+            if "test" not in DATASETS.get(spec["name"]).splits:
+                raise ValueError(f"`eval_datasets.{alias}`: dataset '{spec['name']}' has no test split")
+
     def context(self) -> Context:
         dataset = DATASETS.build(self.cfg.dataset)
         backbone = BACKBONES.build(self.cfg.backbone)
         teacher = BACKBONES.build(self.cfg.teacher) if self.cfg.teacher else None
+        eval_datasets = {alias: DATASETS.build(spec) for alias, spec in (self.cfg.eval_datasets or {}).items()}
         need_patches = any(e.needs_patches for e in self.evaluators.values()) or \
             bool(self.instances is not None and self.instances.needs_patches)
-        return Context(self.cfg, dataset, backbone, teacher, need_patches=need_patches, instances=self.instances)
+        return Context(self.cfg, dataset, backbone, teacher, need_patches=need_patches, instances=self.instances,
+                       eval_datasets=eval_datasets)
 
     def concepts(self, ctx: Context, trace: list[tuple[str, int]] | None = None) -> ConceptSet:
         concepts = self.discovery.discover(ctx)

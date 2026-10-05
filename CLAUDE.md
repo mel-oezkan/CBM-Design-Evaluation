@@ -48,6 +48,8 @@ Stages only talk through the typed containers in `structures.py` and `stages/bas
    by discovery) may load files or weights in their `__init__`.
 4. **Shared state comes from `Context`, never from globals or re-loading.** Use `ctx.split()`,
    `ctx.inputs()`, `ctx.teacher_split()`, `ctx.encode_text()`, `ctx.instances()`, `ctx.parts()`.
+   A split name may be an `eval_datasets:` alias, so reach raw data through `ctx.samples(split)` /
+   `ctx.source(split)` rather than `ctx.dataset.samples(split)`; `ctx.dataset` is the training dataset.
    If a stage needs something new and reusable, add a cached accessor to `Context` instead of
    computing it inside the stage.
 5. **Stages are pure w.r.t. their inputs.** Return new objects (`concepts.subset(idx)`,
@@ -98,6 +100,9 @@ Kind-specific contracts:
 
 - **Dataset**: implement `class_names` and `samples(split)` for `train`/`val`/`test`; set
   `n_attrs` and fill `Sample.attr` when there is a spurious attribute (groups depend on it).
+  A shifted test set of another dataset sets `splits = ("test",)`, uses that dataset's class and
+  concept names (matching is by name), and is used under `eval_datasets:`. Implement
+  `class_concepts()` when concept labels are class-level, so unannotated eval domains inherit them.
   `cache_key()` must include every constructor arg that changes the data.
 - **Backbone**: frozen; set `dim` (and `patch_grid`, `has_text` where applicable).
   `cache_key()` must identify the weights exactly. Patch and text embeddings must live in the

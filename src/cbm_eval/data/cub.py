@@ -106,6 +106,10 @@ class CUB(ImageDataset):
     def concept_names(self) -> list[str]:
         return self._attr_names
 
+    def class_concepts(self) -> torch.Tensor | None:
+        """The majority-voted (200, K) class attributes; None with image-level concepts."""
+        return self._class_concepts
+
     def _load(self) -> None:
         r = self.root
         images = {int(i): p for i, p in _read(r / "images.txt")}
@@ -143,9 +147,11 @@ class CUB(ImageDataset):
                 cls_attr = (cls_mean >= 0.5).astype(np.int8)
             keep = np.where(cls_attr.sum(0) >= self.min_class_count)[0]
             concept_matrix = {i: cls_attr[labels[i], keep] for i in images}
+            self._class_concepts = torch.from_numpy(cls_attr[:, keep]).float()
         else:
             keep = np.arange(n_attr)
             concept_matrix = {i: present[i] for i in images}
+            self._class_concepts = None
         self._attr_names = [all_attr_names[k] for k in keep]
 
         part_names = {int(row[0]): " ".join(row[1:]) for row in _read(r / "parts" / "parts.txt")}

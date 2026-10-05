@@ -177,6 +177,28 @@ and tags are excluded. Sweeps skip `(run_id, seed)` pairs that already succeeded
 sweep can simply be restarted. The hash covers the config, not the code: after changing how a
 variant behaves, re-run with `--force` or write to a new `paths.results` file, or the sweep will
 skip those runs and keep the old numbers. Each row records `git_commit` to tell versions apart.
+
+### Test-only domains
+
+`eval_datasets:` adds shifted test sets, such as CUB as paintings, to a run. The CBM is trained on
+`dataset` alone. Each alias names the eval dataset's `test` split, and an evaluator scores it only
+when the alias is in its `splits`:
+
+```yaml
+dataset: {name: cub, root: data/CUB_200_2011}
+eval_datasets:
+  paintings: {name: cub_paintings, root: data/cub_paintings}
+evaluation:
+  - {name: shift, splits: [val, test, paintings]}
+  - {name: concepts, splits: [test, paintings]}
+```
+
+Classes and concepts are matched to the training dataset's by name, and every eval class must exist
+in the training dataset. An eval dataset without its own concept annotations inherits the training
+dataset's class-level ones (`class_concepts()`, e.g. CUB's majority-voted attributes). A test-only
+dataset cannot be used as `dataset:`.
+
+`eval_datasets` is part of the `run_id`.
 <!-- --8<-- [end:configs] -->
 
 ## Adding a component

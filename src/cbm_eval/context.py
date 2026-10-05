@@ -1,6 +1,10 @@
 """Shared run state handed to every stage: dataset, backbones, cached features, text embeddings,
 and (for bag-based CBMs) per-image instance sets. After a run fine-tunes the backbone,
-``PipelineBuilder`` installs the fine-tuned encoder and the CBM's inputs become its features."""
+``PipelineBuilder`` installs the fine-tuned encoder and the CBM's inputs become its features.
+
+A split name is ``train``/``val``/``test`` of the training dataset or a key of ``eval_datasets:``,
+which names that dataset's ``test`` split. Eval splits are served in the training dataset's label
+and concept space, so evaluators treat every split alike."""
 
 from __future__ import annotations
 
@@ -13,17 +17,20 @@ from torch.utils.data import Dataset as TorchDataset
 
 from .backbones.base import Backbone
 from .config import ExperimentConfig
-from .data.base import ImageDataset
+from .data.base import SPLITS, ImageDataset
 from .data.features import encode_split, load_features
 from .data.parts import input_geometry, load_parts
+from .stages.common import match_names
 from .structures import Bag, ConceptSet, FeatureSplit, InstanceSplit, PartSplit
 from .utils import resolve_device
 
 
 class Context:
     def __init__(self, cfg: ExperimentConfig, dataset: ImageDataset, backbone: Backbone,
-                 teacher: Backbone | None = None, need_patches: bool = False, instances=None):
+                 teacher: Backbone | None = None, need_patches: bool = False, instances=None,
+                 eval_datasets: dict[str, ImageDataset] | None = None):
         self.cfg, self.dataset, self.backbone = cfg, dataset, backbone
+        self.eval_datasets = eval_datasets or {}
         self.teacher = teacher if teacher is not None else (backbone if backbone.has_text else None)
         self.need_patches = need_patches
         self.device = resolve_device(cfg.device)
@@ -53,13 +60,31 @@ class Context:
     def feat_dim(self) -> int:
         return self.backbone.dim
 
+    @property
+    def splits(self) -> tuple[str, ...]:
+        """Every split name of the run: the training dataset's, then the ``eval_datasets`` keys."""
+        return (*SPLITS, *self.eval_datasets)
+
+    def source(self, name: str) -> tuple[ImageDataset, str]:
+        """The dataset a split name refers to and that dataset's own split name."""
+        if name in SPLITS:
+            return self.dataset, name
+        if name in self.eval_datasets:
+            return self.eval_datasets[name], "test"
+        raise ValueError(f"Unknown split '{name}': use one of {list(self.splits)} "
+                         f"(add test-only datasets under `eval_datasets:`)")
+
+    def samples(self, name: str) -> list:
+        """Raw samples of a split (``Dataset.samples`` of the dataset it refers to)."""
+        dataset, split = self.source(name)
+        return dataset.samples(split)
+
     def split(self, name: str) -> FeatureSplit:
         """The CBM's input features for a split: cached frozen-backbone features, or, once a
         fine-tuned encoder is installed (``use_encoder``), that encoder's features (in memory)."""
         key = ("backbone", name)
         if key not in self._splits:
-            self._splits[key] = load_features(self.dataset, self.backbone, name, self.cache_dir,
-                                              patches=self.need_patches)
+            self._splits[key] = self._features(self.backbone, name, patches=self.need_patches)
         if self._encoder is None:
             return self._splits[key]
         tuned = ("encoder", name)
@@ -74,7 +99,8 @@ class Context:
         key = (name, augment)
         if key not in self._images:
             tf = self.backbone.train_transform() if augment else self.backbone.transform()
-            self._images[key] = self.dataset.torch_split(name, tf)
+            dataset, split = self.source(name)
+            self._images[key] = dataset.torch_split(split, tf)
         return self._images[key]
 
     def use_encoder(self, encoder: nn.Module | None, num_workers: int = 0) -> None:
@@ -109,7 +135,14 @@ class Context:
         key = (name, geometry, seg_size)
         if key not in self._parts:
             ops = input_geometry(self.backbone.transform()) if geometry == "input" else []
-            self._parts[key] = load_parts(self.dataset, name, self.cache_dir, ops, seg_size)
+            dataset, split = self.source(name)
+            parts = load_parts(dataset, split, self.cache_dir, ops, seg_size)
+            if parts is not None and dataset is not self.dataset:
+                idx = match_names(self.dataset.concept_names or [], dataset.concept_names)
+                parts = None if not idx or None in idx else dataclasses.replace(
+                    parts, concept_keypoints=parts.concept_keypoints[idx],
+                    concept_segs=None if parts.concept_segs is None else parts.concept_segs[idx])
+            self._parts[key] = parts
         return self._parts[key]
 
     def teacher_split(self, name: str) -> FeatureSplit:
@@ -120,8 +153,33 @@ class Context:
             return self.split(name)
         key = ("teacher", name)
         if key not in self._splits:
-            self._splits[key] = load_features(self.dataset, self.teacher, name, self.cache_dir)
+            self._splits[key] = self._features(self.teacher, name)
         return self._splits[key]
+
+    def _features(self, backbone: Backbone, name: str, patches: bool = False) -> FeatureSplit:
+        dataset, split = self.source(name)
+        fs = load_features(dataset, backbone, split, self.cache_dir, patches=patches)
+        return fs if dataset is self.dataset else self._in_training_space(name, dataset, fs)
+
+    def _in_training_space(self, name: str, dataset: ImageDataset, fs: FeatureSplit) -> FeatureSplit:
+        """An eval split with labels as training-class indices and concept labels in the order of
+        the training dataset's ``concept_names``: its own annotations when it has all of them, else
+        the training dataset's ``class_concepts`` of each image's class, else none."""
+        cls = match_names(dataset.class_names, self.dataset.class_names)
+        missing = [c for c, i in zip(dataset.class_names, cls) if i is None]
+        if missing:
+            raise ValueError(f"`eval_datasets.{name}` ({dataset.name}) has classes that the training dataset "
+                             f"'{self.dataset.name}' lacks, e.g. {missing[:3]}; train on a dataset with them")
+        labels = torch.tensor(cls)[fs.labels]
+        groups = None if fs.attrs is None else labels * dataset.n_attrs + fs.attrs
+        concepts = masks = None
+        idx = match_names(self.dataset.concept_names or [], dataset.concept_names)
+        if fs.concept_labels is not None and idx and None not in idx:
+            concepts = fs.concept_labels[:, idx]
+            masks = None if fs.part_masks is None else fs.part_masks[:, idx]
+        elif (class_concepts := self.dataset.class_concepts()) is not None:
+            concepts = class_concepts[labels].float()
+        return dataclasses.replace(fs, labels=labels, groups=groups, concept_labels=concepts, part_masks=masks)
 
     def encode_text(self, texts: list[str], which: str = "teacher") -> torch.Tensor:
         model = self.teacher if which == "teacher" else self.backbone

@@ -53,10 +53,16 @@ class Sample:
 
 
 class ImageDataset(ABC):
-    """A labelled dataset with an optional spurious attribute and optional concept annotations."""
+    """A labelled dataset with an optional spurious attribute and optional concept annotations.
+
+    ``splits`` are the splits ``samples`` serves. A test-only dataset (a shifted version of a
+    training dataset, e.g. CUB as paintings) sets ``("test",)`` and can only be used under
+    ``eval_datasets:``, where its classes and concepts are matched to the training dataset's by name.
+    """
 
     name: str = "dataset"
     n_attrs: int = 1
+    splits: tuple[str, ...] = SPLITS
 
     @property
     @abstractmethod
@@ -65,6 +71,11 @@ class ImageDataset(ABC):
     @property
     def concept_names(self) -> list[str] | None:
         """Names of human-annotated concepts, or None if the dataset has no annotations."""
+        return None
+
+    def class_concepts(self) -> torch.Tensor | None:
+        """(C, K_h) class-level concept labels (rows ``class_names``, columns ``concept_names``), or
+        None. Eval datasets without their own concept annotations inherit labels through this."""
         return None
 
     @abstractmethod
