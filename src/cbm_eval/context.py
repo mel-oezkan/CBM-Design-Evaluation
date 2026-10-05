@@ -1,17 +1,22 @@
 """Shared run state handed to every stage: dataset, backbones, cached features, text embeddings,
-and (for bag-based CBMs) per-image instance sets."""
+and (for bag-based CBMs) per-image instance sets. After a run fine-tunes the backbone,
+``PipelineBuilder`` installs the fine-tuned encoder and the CBM's inputs become its features."""
 
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 
 import torch
+from torch import nn
+from torch.utils.data import Dataset as TorchDataset
 
 from .backbones.base import Backbone
 from .config import ExperimentConfig
 from .data.base import ImageDataset
-from .data.features import load_features
-from .structures import Bag, ConceptSet, FeatureSplit, InstanceSplit
+from .data.features import encode_split, load_features
+from .data.parts import input_geometry, load_parts
+from .structures import Bag, ConceptSet, FeatureSplit, InstanceSplit, PartSplit
 from .utils import resolve_device
 
 
@@ -29,6 +34,10 @@ class Context:
         self.instance_source = instances
         self.concepts: ConceptSet | None = None  # the filtered set; concept-guided instance sources read it
         self._instances: dict[tuple, InstanceSplit] = {}
+        self._parts: dict[tuple, PartSplit | None] = {}
+        self._encoder: nn.Module | None = None  # fine-tuned image encoder of the current run, if any
+        self._images: dict[tuple[str, bool], TorchDataset] = {}
+        self._workers = 0  # dataloader workers for encoding images with the fine-tuned encoder
         for bb in {id(b): b for b in (self.backbone, self.teacher) if b is not None}.values():
             bb.to(self.device)
 
@@ -45,12 +54,34 @@ class Context:
         return self.backbone.dim
 
     def split(self, name: str) -> FeatureSplit:
-        """Backbone features (the CBM's input) for a split."""
+        """The CBM's input features for a split: cached frozen-backbone features, or, once a
+        fine-tuned encoder is installed (``use_encoder``), that encoder's features (in memory)."""
         key = ("backbone", name)
         if key not in self._splits:
             self._splits[key] = load_features(self.dataset, self.backbone, name, self.cache_dir,
                                               patches=self.need_patches)
-        return self._splits[key]
+        if self._encoder is None:
+            return self._splits[key]
+        tuned = ("encoder", name)
+        if tuned not in self._splits:
+            feats = encode_split(self.image_split(name), self._encoder, self.device, num_workers=self._workers)
+            self._splits[tuned] = dataclasses.replace(self._splits[key], features=feats, patch_features=None)
+        return self._splits[tuned]
+
+    def image_split(self, name: str, augment: bool = False) -> TorchDataset:
+        """Images of a split as a torch dataset of dicts (``image``, ``label``, ``index``, ...), with
+        the backbone's eval transform or, with ``augment``, its fine-tuning transform."""
+        key = (name, augment)
+        if key not in self._images:
+            tf = self.backbone.train_transform() if augment else self.backbone.transform()
+            self._images[key] = self.dataset.torch_split(name, tf)
+        return self._images[key]
+
+    def use_encoder(self, encoder: nn.Module | None, num_workers: int = 0) -> None:
+        """Install (or, with None, remove) a fine-tuned encoder. Only ``PipelineBuilder`` calls this."""
+        self._encoder, self._workers = encoder, num_workers
+        for key in [k for k in self._splits if k[0] == "encoder"]:
+            del self._splits[key]
 
     def instances(self, name: str) -> InstanceSplit:
         """Per-image instance sets (patches or segments) for a split, from the ``instances:`` source."""
@@ -70,6 +101,16 @@ class Context:
             return self.split(name).features, None
         inst = self.instances(name)
         return inst.features, inst.bag
+
+    def parts(self, name: str, geometry: str = "input", seg_size: int = 56) -> PartSplit | None:
+        """Part keypoints / masks for a split, or None if the dataset has none. ``geometry="input"``
+        maps them through the backbone's resize and crop (patch maps); ``"full"`` keeps the whole
+        image (segment instance regions)."""
+        key = (name, geometry, seg_size)
+        if key not in self._parts:
+            ops = input_geometry(self.backbone.transform()) if geometry == "input" else []
+            self._parts[key] = load_parts(self.dataset, name, self.cache_dir, ops, seg_size)
+        return self._parts[key]
 
     def teacher_split(self, name: str) -> FeatureSplit:
         """Features from the vision-language teacher used for pseudo-labels and text filters."""

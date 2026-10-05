@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 import torch
@@ -14,12 +14,42 @@ SPLITS = ("train", "val", "test")
 
 
 @dataclass
+class PartAnnotation:
+    """One image's part annotations in pixel coordinates of the original image.
+
+    ``points`` maps a keypoint group (e.g. "wing") to its visible keypoints (left and right wing);
+    ``masks`` maps a segmentation group to the mask files whose union is that part.
+    """
+
+    size: tuple[int, int]  # (w, h)
+    points: dict[str, list[tuple[float, float]]] = field(default_factory=dict)
+    masks: dict[str, list[str]] = field(default_factory=dict)
+
+
+@dataclass
+class PartSpec:
+    """Which parts a dataset annotates, and which concepts (``concept_names``) belong to each."""
+
+    keypoint_groups: list[str]
+    seg_groups: list[str]
+    concept_keypoints: torch.Tensor  # (K_h, Q) bool
+    concept_segs: torch.Tensor  # (K_h, G) bool
+    max_points: int = 2  # keypoints per group (left / right)
+    source: str = ""  # where the masks come from; part of the cache key
+
+    def cache_key(self) -> dict[str, Any]:
+        return {"kp": self.keypoint_groups, "seg": self.seg_groups, "source": self.source,
+                "ck": self.concept_keypoints.int().tolist(), "cs": self.concept_segs.int().tolist()}
+
+
+@dataclass
 class Sample:
     image: Any  # path (str) for real datasets, tensor for synthetic ones
     label: int
     attr: int = 0
     concepts: list[int] | None = None  # human concept annotations, aligned with concept_names
     keypoints: dict[int, tuple[float, float, float, float]] | None = None  # concept idx -> (x, y, w, h) of image
+    parts: PartAnnotation | None = None  # keypoints and segmentation masks per body part
 
 
 class ImageDataset(ABC):
@@ -43,6 +73,10 @@ class ImageDataset(ABC):
     def cache_key(self) -> dict[str, Any]:
         """Everything that changes the data; used to key the feature cache."""
         return {"name": self.name}
+
+    def part_spec(self) -> PartSpec | None:
+        """Part groups and the concept -> part mapping, or None if the dataset has no part annotations."""
+        return None
 
     def torch_split(self, split: str, transform: Callable | None, grid: int | None = None) -> TorchDataset:
         return _SampleDataset(self.samples(split), transform, len(self.concept_names or []), grid)

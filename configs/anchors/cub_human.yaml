@@ -13,4 +13,6 @@ evaluation:
   - {name: shift}
   - {name: leakage}
   - {name: localization}
+  - {name: keypoint_distance}
+  - {name: part_iou}           # needs the CUB70 part masks; reports nothing without them
 paths: {cache: .cache, runs: runs/cub, results: results/cub.jsonl}

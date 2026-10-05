@@ -30,6 +30,25 @@ class FeatureSplit:
 
 
 @dataclass
+class PartSplit:
+    """Part annotations for one split, in the frame of the concept maps (see ``data/parts.py``).
+
+    ``concept_keypoints`` / ``concept_segs`` say which dataset concepts (``Dataset.concept_names``)
+    belong to each keypoint / segmentation group.
+    """
+
+    points: torch.Tensor  # (N, Q, max_points, 2) normalized (x, y); NaN if not visible
+    keypoint_groups: list[str]
+    concept_keypoints: torch.Tensor  # (K_h, Q) bool
+    segs: torch.Tensor | None = None  # (N, G, S, S) bool; all False if the image has no mask for a part
+    seg_groups: list[str] = field(default_factory=list)
+    concept_segs: torch.Tensor | None = None  # (K_h, G) bool
+
+    def __len__(self) -> int:
+        return len(self.points)
+
+
+@dataclass
 class Bag:
     """Marks the real instances in a zero-padded ``(N, M, ...)`` batch of per-image instance sets.
 
