@@ -43,10 +43,16 @@ class GroundingDINOScorer:
                  concepts_per_prompt: int = 16, batch_size: int = 8):
         self.model_id, self.box_threshold = model, box_threshold
         self.concepts_per_prompt, self.batch_size = concepts_per_prompt, batch_size
+        # Everything that changes the scores (concepts are prompted together in chunks of
+        # concepts_per_prompt). batch_size only groups images, so it stays out of the key.
+        self.kw = {"model": model, "box_threshold": box_threshold, "concepts_per_prompt": concepts_per_prompt}
         self.detector = None
 
+    def cache_key(self) -> dict:
+        return {"name": "grounding_dino", **self.kw}
+
     def score(self, concepts: ConceptSet, ctx: "Context", split: str) -> torch.Tensor:
-        key = {"model": self.model_id, "data": ctx.dataset.cache_key(), "split": split, "concepts": concepts.names}
+        key = {"scorer": self.cache_key(), "data": ctx.dataset.cache_key(), "split": split, "concepts": concepts.names}
         path = ctx.cache_dir / "scores" / f"gdino-{split}-{stable_hash(key)}.pt"
         if path.exists():
             return torch.load(path)

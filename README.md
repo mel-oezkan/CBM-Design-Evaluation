@@ -200,3 +200,5 @@ and stub LLM/VLM clients.
 **Not yet run against real data or pretrained weights:** OpenCLIP and DINOv2 feature extraction
 (including ViT patch tokens), the CUB and MetaShift loaders, live Claude/ConceptNet calls, and
 Grounding DINO scoring. Expect small fixes on first contact.
+A response cut off at `max_tokens` (default 4000) raises instead of being cached; raise it with
+`{name: llm, max_tokens: 8000}`.
