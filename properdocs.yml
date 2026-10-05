@@ -1,0 +1,72 @@
+site_name: cbm-eval
+site_description: A controlled design study of concept bottleneck models
+repo_url: https://github.com/mel-oezkan/CBM-Design-Evaluation
+edit_uri: edit/main/docs/
+docs_dir: docs
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle: {icon: material/brightness-7, name: Dark mode}
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle: {icon: material/brightness-4, name: Light mode}
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc: {permalink: true}
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.snippets:
+      # Pages include sections of README.md / CLAUDE.md (``--8<-- [start:name]`` markers) so the
+      # text lives in one place.
+      base_path: ["."]
+      check_paths: true
+
+plugins:
+  - search
+  - gen-files:
+      scripts: [scripts/gen_component_docs.py]
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: null      # docstrings are prose with ``code``, not Google/NumPy sections
+            show_source: true
+            show_root_heading: true
+            show_root_full_path: false
+            members_order: source
+            merge_init_into_class: true
+            separate_signature: true
+            show_signature_annotations: true
+            show_if_no_docstring: true
+            filters: ["!^_"]
+
+nav:
+  - Home: index.md
+  - Architecture: architecture.md
+  - Configs: configs.md
+  - Component catalogue: components.md
+  - Guides:
+      - Data: data.md
+      - Metrics: metrics.md
+      - Instance bags (SEG-MIL-CBM): instance-bags.md
+      - Part localization (CUB): part-localization.md
+  - Reproductions:
+      - Koh et al. 2020: koh2020_reproduction.md
+  - Contributing: contributing.md
+  - API reference:
+      - Core: api/core.md
+      - Stage interfaces: api/stages.md
+      - Data, backbones, instances: api/inputs.md
+      - Evaluation and analysis: api/evaluation.md

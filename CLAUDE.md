@@ -9,11 +9,13 @@ changing the code without breaking the architecture.
 ```bash
 uv sync                      # core + dev (pytest); `uv sync --all-extras` for CLIP / HF / Claude
 uv run pytest -q             # fully offline, ~5 s; must stay green and offline
+uv run --group docs properdocs build --strict   # docs site; must build without warnings
 uv run cbm-eval list         # every registered component, per registry
 uv run cbm-eval run configs/anchors/synthetic.yaml --seeds 0
 ```
 
 ## Architecture in one paragraph
+<!-- --8<-- [start:architecture] -->
 
 A run is an `ExperimentConfig` (`config.py`) → `PipelineBuilder` (`pipeline.py`) builds every
 component by name from a `Registry` (`registry.py`) → stages run in a fixed order
@@ -22,7 +24,9 @@ component by name from a `Registry` (`registry.py`) → stages run in a fixed or
 `(run_id, seed)` goes to the JSONL `ResultsStore` (`results.py`) → `analysis.py` aggregates.
 Stages only talk through the typed containers in `structures.py` and `stages/base.py`
 (`ConceptSet`, `AlignedConcepts`, `ConceptLayer`, `PredictorHead`, `FeatureSplit`, `Bag`, ...).
+<!-- --8<-- [end:architecture] -->
 
+<!-- --8<-- [start:rules] -->
 ## Core rules
 
 1. **Everything pluggable goes through a registry.** A new variant is a class decorated with
@@ -84,7 +88,11 @@ Steps:
    to `CASES` in `tests/test_cache_keys.py`: every constructor arg must change the key or be listed
    as exempt with a reason.
 6. Update the stage/variant tables in `README.md`, and add an ablation factor or anchor under
-   `configs/` if the variant is part of the study.
+   `configs/` if the variant is part of the study. The class docstring and constructor signature
+   are the variant's entry in the docs' component catalogue (`scripts/gen_component_docs.py`).
+
+The docs pages under `docs/` include sections of `README.md` and this file through snippet
+section markers (HTML comments starting with `--8<--`); keep them when editing around them.
 
 Kind-specific contracts:
 
@@ -156,3 +164,4 @@ Match the surrounding code: `from __future__ import annotations`, type hints, mo
 short docstrings that state shapes (`(N, M, D)`) and intent, compact multi-assignment in
 `__init__`, comments only where the *why* isn't obvious. Shapes in comments use `N` images,
 `M` instances, `K` concepts, `D` feature dim, `P` patches.
+<!-- --8<-- [end:rules] -->

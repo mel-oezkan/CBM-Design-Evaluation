@@ -1,17 +1,21 @@
 # CBM-Design-Evaluation
+<!-- --8<-- [start:intro] -->
 
 Research code for a controlled design study of concept bottleneck models (CBMs). A CBM is assembled
 from six interchangeable stages, trained on cached backbone features, evaluated for robustness,
 leakage and localization, and logged as one row per run and seed for factor-level analysis.
+<!-- --8<-- [end:intro] -->
 
 ![architecture](cbm_research_code_architecture.png)
 
+<!-- --8<-- [start:start] -->
 ## Setup
 
 ```bash
 uv sync                                          # core + dev group (pytest)
 uv sync --all-extras                             # + CLIP, Grounding DINO, Claude discovery, mixed models
 uv run pytest -q                                 # fully offline, ~5 s
+uv run --group docs properdocs serve             # docs site at http://127.0.0.1:8000
 ```
 
 ## Quickstart
@@ -24,7 +28,9 @@ uv run cbm-eval sweep configs/ablations/synthetic_stages.yaml --dry-run
 uv run cbm-eval sweep configs/ablations/synthetic_stages.yaml
 uv run cbm-eval analyze --results results/synthetic.jsonl --metric shift.test.wga --frontier leakage.intervention.gain
 ```
+<!-- --8<-- [end:start] -->
 
+<!-- --8<-- [start:layout] -->
 ## Layout
 
 | Diagram box | Code |
@@ -69,8 +75,10 @@ How the stages divide the work:
   `part_iou`).
 - Non-CLIP backbones need a text-capable `teacher:` for `clip` alignment and the `clip`/`select`
   filters (see `configs/ablations/waterbirds_backbones.yaml`).
+<!-- --8<-- [end:layout] -->
 
 ## Instance bags (SEG-MIL-CBM)
+<!-- --8<-- [start:instances] -->
 
 [arXiv 2510.04180](https://arxiv.org/abs/2510.04180) classifies an image from a *bag* of
 concept-guided segments. A top-level `instances:` key turns on bags, and every stage runs per
@@ -102,8 +110,10 @@ meaningful.
 
 Training stays on CPU unless `training.device` is set; the SEG-MIL anchors use `device: auto`
 (GPU when present). Segmentation and encoding run on the top-level `device`.
+<!-- --8<-- [end:instances] -->
 
 ## Part localization (CUB)
+<!-- --8<-- [start:parts] -->
 
 `keypoint_distance` and `part_iou` re-implement the ProtoCBM localization metrics
 ([pascal0012/ProtoCBM](https://github.com/pascal0012/ProtoCBM), `localization/`). Concept maps are
@@ -122,8 +132,10 @@ Differences from ProtoCBM: the peak is the center of the top patch rather than t
 bilinear upsample (the same up to sub-patch rounding, but without the corner bias of clamped
 borders). Distances are normalized by the image side rather than measured in pixels. IoU is
 computed at `seg_size` rather than at full image resolution.
+<!-- --8<-- [end:parts] -->
 
 ## Configs
+<!-- --8<-- [start:configs] -->
 
 An anchor fully specifies one run. Each stage is `{name: <variant>, **kwargs}`, and the kwargs go
 straight to the variant's constructor. An ablation names an anchor and a set of factors:
@@ -152,8 +164,10 @@ and tags are excluded. Sweeps skip `(run_id, seed)` pairs that already succeeded
 sweep can simply be restarted. The hash covers the config, not the code: after changing how a
 variant behaves, re-run with `--force` or write to a new `paths.results` file, or the sweep will
 skip those runs and keep the old numbers. Each row records `git_commit` to tell versions apart.
+<!-- --8<-- [end:configs] -->
 
 ## Adding a component
+<!-- --8<-- [start:adding] -->
 
 ```python
 from cbm_eval.registry import FILTERING
@@ -191,8 +205,10 @@ class JointSmooth(Joint):
 ```
 
 See `CLAUDE.md` for the full contract per component kind.
+<!-- --8<-- [end:adding] -->
 
 ## Data
+<!-- --8<-- [start:data] -->
 
 Point `dataset.root` at:
 
@@ -217,8 +233,10 @@ LLM, VLM, ConceptNet and Grounding DINO outputs are cached under the same direct
 refusal fallback is enabled. Credentials come from `ANTHROPIC_API_KEY` or an `ant auth login` profile.
 A response cut off at `max_tokens` (default 4000) raises instead of being cached; raise it with
 `{name: llm, max_tokens: 8000}`.
+<!-- --8<-- [end:data] -->
 
 ## Metrics
+<!-- --8<-- [start:metrics] -->
 
 All metrics are prefixed by their evaluator name, e.g. `shift.test.wga`.
 
@@ -238,7 +256,9 @@ All metrics are prefixed by their evaluator name, e.g. `shift.test.wga`.
 - `localization`: pointing game and locality (map mass inside the annotated region, with
   `locality_chance` for reference). Only concepts that match an annotated dataset concept by name
   are scored.
+<!-- --8<-- [end:metrics] -->
 
+<!-- --8<-- [start:status] -->
 ## Status
 
 The whole pipeline and every stage variant are tested end-to-end on the synthetic dataset and toy
@@ -248,3 +268,4 @@ and stub LLM/VLM clients.
 **Not yet run against real data or pretrained weights:** OpenCLIP and DINOv2 feature extraction
 (including ViT patch tokens), the CUB and MetaShift loaders, live Claude/ConceptNet calls, and
 Grounding DINO scoring. Expect small fixes on first contact.
+<!-- --8<-- [end:status] -->
