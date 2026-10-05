@@ -1,0 +1,24 @@
+# Fully offline anchor: synthetic data + toy backbone. Used by tests and for quick iteration.
+name: synthetic
+dataset: {name: synthetic}
+backbone: {name: toy}
+stages:
+  discovery:
+    name: static
+    names: [concept_00, concept_01, concept_02, concept_03, concept_04, concept_05, concept_06, concept_07,
+            concept_08, concept_09, concept_10, concept_11, concept_12, concept_13, concept_14, concept_15,
+            concept_16, concept_17, concept_18, concept_19, concept_20, concept_21, concept_22, concept_23,
+            distractor_00, distractor_01, distractor_02, distractor_03, class_0]
+  filtering:
+    - {name: rules}
+    - {name: clip, dedupe_sim: 0.9}
+    - {name: select, k: 20, method: submodular}
+  generation: {name: scores}
+  alignment: {name: clip}
+  predictor: {name: sparse, lam: 0.001}
+  training: {name: sequential, epochs: 100}
+evaluation:
+  - {name: shift}
+  - {name: leakage}
+  - {name: localization}
+paths: {cache: .cache, runs: runs/synthetic, results: results/synthetic.jsonl}

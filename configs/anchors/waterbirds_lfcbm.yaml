@@ -1,0 +1,18 @@
+# Label-free-CBM-style anchor on Waterbirds.
+name: waterbirds_lfcbm
+dataset: {name: waterbirds, root: data/waterbirds}
+backbone: {name: clip, model: ViT-B-16, pretrained: openai}
+stages:
+  discovery: {name: llm, per_class: 10}
+  filtering:
+    - {name: rules}
+    - {name: clip, class_sim: 0.85, dedupe_sim: 0.9}
+    - {name: select, k: 50, method: submodular}
+  generation: {name: scores}
+  alignment: {name: clip}
+  predictor: {name: sparse, lam: 0.0007}
+  training: {name: sequential}
+evaluation:
+  - {name: shift}
+  - {name: leakage}
+paths: {cache: .cache, runs: runs/waterbirds, results: results/waterbirds.jsonl}

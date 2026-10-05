@@ -1,0 +1,31 @@
+# SEG-MIL-CBM (Eisenberg et al., arXiv 2510.04180) on Waterbirds: LF-CBM concepts, Grounding DINO
+# boxes for each image's top-10 concepts, SAM masks, per-segment CLIP targets, attention-MIL head.
+# Shares its results file with waterbirds_lfcbm so both land in one analysis.
+name: waterbirds_segmil
+dataset: {name: waterbirds, root: data/waterbirds}
+backbone: {name: clip, model: ViT-B-16, pretrained: openai}
+instances:
+  name: grounded_sam
+  top_k: 10
+  boxes_per_concept: 2
+  max_segments: 16
+  min_pixels: 256
+  max_frac: 0.9
+  merge_iou: 0.8
+  detector: {model: IDEA-Research/grounding-dino-tiny, box_threshold: 0.25, text_threshold: 0.25}
+  sam: {model: facebook/sam-vit-base}
+stages:
+  discovery: {name: llm, per_class: 10}
+  filtering:
+    - {name: rules}
+    - {name: clip, class_sim: 0.85, dedupe_sim: 0.9}
+    - {name: select, k: 50, method: submodular}
+  generation: {name: scores}
+  alignment: {name: segment_clip, targets: softmax, temperature: 0.01}
+  predictor: {name: mil, pooling: attention, attn_dim: 128, tau: 1.0, area_gamma: 0.25}
+  training: {name: joint, concept_weight: 0.1, concept_loss: cosine, device: auto}
+evaluation:
+  - {name: shift}
+  - {name: leakage}
+  - {name: faithfulness, n_images: 3000}
+paths: {cache: .cache, runs: runs/waterbirds, results: results/waterbirds.jsonl}

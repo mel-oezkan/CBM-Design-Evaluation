@@ -1,0 +1,16 @@
+# Classic CBM anchor on CUB: annotated attributes, human supervision, localization via part keypoints.
+name: cub_human
+dataset: {name: cub, root: data/CUB_200_2011}
+backbone: {name: clip, model: ViT-B-16, pretrained: openai}
+stages:
+  discovery: {name: dataset}
+  filtering: [{name: rules, remove_class_names: false, max_words: 10}]
+  generation: {name: scores}
+  alignment: {name: human}
+  predictor: {name: dense}
+  training: {name: sequential}
+evaluation:
+  - {name: shift}
+  - {name: leakage}
+  - {name: localization}
+paths: {cache: .cache, runs: runs/cub, results: results/cub.jsonl}

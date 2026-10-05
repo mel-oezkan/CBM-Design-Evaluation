@@ -1,0 +1,18 @@
+# SEG-MIL-CBM on CUB for the paper's segment-faithfulness numbers (deletion / insertion).
+# LLM concepts do not match CUB's attribute names, so the localization evaluator has nothing to score.
+name: cub_segmil
+dataset: {name: cub, root: data/CUB_200_2011}
+backbone: {name: clip, model: ViT-B-16, pretrained: openai}
+instances: {name: grounded_sam, top_k: 10, boxes_per_concept: 2, max_segments: 16}
+stages:
+  discovery: {name: llm, per_class: 10}
+  filtering:
+    - {name: rules}
+    - {name: clip, class_sim: 0.85, dedupe_sim: 0.9}
+    - {name: select, k: 400, method: submodular}
+  generation: {name: scores}
+  alignment: {name: segment_clip}
+  predictor: {name: mil, area_gamma: 0.25}
+  training: {name: joint, concept_weight: 0.1, concept_loss: cosine, device: auto}
+evaluation: [{name: shift}, {name: faithfulness, n_images: 3000}]
+paths: {cache: .cache, runs: runs/cub, results: results/cub.jsonl}

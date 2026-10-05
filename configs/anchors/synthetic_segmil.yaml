@@ -1,0 +1,18 @@
+# Offline SEG-MIL-style anchor: patch tokens as instances on the synthetic data (runs in ~1 s).
+name: synthetic_segmil
+dataset: {name: synthetic}
+backbone: {name: toy}
+instances: {name: patches}
+stages:
+  discovery: {name: dataset}
+  filtering: [{name: rules}]
+  generation: {name: scores}
+  alignment: {name: segment_clip}
+  predictor: {name: mil, area_gamma: 0.25}
+  training: {name: joint, concept_weight: 0.1, concept_loss: cosine, epochs: 100}
+evaluation:
+  - {name: shift}
+  - {name: leakage}
+  - {name: localization}
+  - {name: faithfulness}
+paths: {cache: .cache, runs: runs/synthetic, results: results/synthetic.jsonl}

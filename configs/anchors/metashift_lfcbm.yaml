@@ -1,0 +1,15 @@
+name: metashift_lfcbm
+dataset: {name: metashift, root: data/metashift}
+backbone: {name: clip, model: ViT-B-16, pretrained: openai}
+stages:
+  discovery: {name: llm, per_class: 10}
+  filtering:
+    - {name: rules}
+    - {name: clip}
+    - {name: select, k: 50}
+  generation: {name: scores}
+  alignment: {name: clip}
+  predictor: {name: sparse, lam: 0.0007}
+  training: {name: sequential}
+evaluation: [{name: shift}, {name: leakage}]
+paths: {cache: .cache, runs: runs/metashift, results: results/metashift.jsonl}
