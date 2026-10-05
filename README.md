@@ -115,7 +115,9 @@ dotted key instead.
 
 The `run_id` is a hash of everything that defines the model and its evaluation. Seed, name, paths
 and tags are excluded. Sweeps skip `(run_id, seed)` pairs that already succeeded, so an interrupted
-sweep can simply be restarted.
+sweep can simply be restarted. The hash covers the config, not the code: after changing how a
+variant behaves, re-run with `--force` or write to a new `paths.results` file, or the sweep will
+skip those runs and keep the old numbers. Each row records `git_commit` to tell versions apart.
 
 ## Adding a component
 
@@ -132,6 +134,11 @@ class MyFilter(Filter):
         ...
         return concepts.subset(keep)
 ```
+
+In `grid` mode, a dotted key is applied to every combination. With both `stages.predictor: [{name:
+sparse}, {name: dense}]` and `stages.predictor.lam: [...]`, `lam` is also written into the `dense`
+spec, which rejects it. Put the parameter inside the spec (`{name: sparse, lam: 0.001}`) or split
+the sweep into two ablations.
 
 Import the module from its package `__init__.py`. It then becomes available as `{name: my_filter, threshold: 0.3}`.
 
