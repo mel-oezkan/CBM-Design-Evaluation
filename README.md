@@ -1,41 +1,47 @@
 # CBM-Design-Evaluation
+<!-- --8<-- [start:intro] -->
 
 Research code for a controlled design study of concept bottleneck models (CBMs). A CBM is assembled
 from six interchangeable stages, trained on cached backbone features, evaluated for robustness,
 leakage and localization, and logged as one row per run and seed for factor-level analysis.
+<!-- --8<-- [end:intro] -->
 
 ![architecture](cbm_research_code_architecture.png)
 
+<!-- --8<-- [start:start] -->
 ## Setup
 
 ```bash
-uv venv && uv pip install -e ".[dev]"          # core + tests
-uv pip install -e ".[clip,hf,llm,analysis]"     # CLIP, Grounding DINO, Claude discovery, mixed models
-.venv/bin/python -m pytest -q                    # fully offline, ~5 s
+uv sync                                          # core + dev group (pytest)
+uv sync --all-extras                             # + CLIP, Grounding DINO, Claude discovery, mixed models
+uv run pytest -q                                 # fully offline, ~5 s
+uv run --group docs properdocs serve             # docs site at http://127.0.0.1:8000
 ```
 
 ## Quickstart
 
 ```bash
-cbm-eval list                                               # registered components per stage
-cbm-eval run configs/anchors/synthetic.yaml --seeds 0 1 2   # offline anchor
-cbm-eval run configs/anchors/synthetic.yaml --set stages.predictor.lam=0.01
-cbm-eval sweep configs/ablations/synthetic_stages.yaml --dry-run
-cbm-eval sweep configs/ablations/synthetic_stages.yaml
-cbm-eval analyze --results results/synthetic.jsonl --metric shift.test.wga --frontier leakage.intervention.gain
+uv run cbm-eval list                                               # registered components per stage
+uv run cbm-eval run configs/anchors/synthetic.yaml --seeds 0 1 2   # offline anchor
+uv run cbm-eval run configs/anchors/synthetic.yaml --set stages.predictor.lam=0.01
+uv run cbm-eval sweep configs/ablations/synthetic_stages.yaml --dry-run
+uv run cbm-eval sweep configs/ablations/synthetic_stages.yaml
+uv run cbm-eval analyze --results results/synthetic.jsonl --metric shift.test.wga --frontier leakage.intervention.gain
 ```
+<!-- --8<-- [end:start] -->
 
+<!-- --8<-- [start:layout] -->
 ## Layout
 
 | Diagram box | Code |
 |---|---|
 | Experiment configs | `configs/anchors/*.yaml`, `configs/ablations/*.yaml`, `src/cbm_eval/config.py` |
 | Datasets | `data/` — `waterbirds`, `cub`, `metashift`, `synthetic` |
-| Backbones | `backbones/` — `clip` (OpenCLIP), `dinov2`, `resnet`, `toy` |
+| Backbones | `backbones/` — `clip` (OpenCLIP), `dinov2`, `resnet`, `inception` (Inception-v3), `toy` |
 | Pipeline builder | `pipeline.py` (+ `registry.py`, `context.py`) |
 | Stage modules | `stages/` — one ABC per stage in `stages/base.py` |
 | Trained CBM | `model.py` — weights + cached concept scores, saved to `runs/<run_id>-s<seed>/` |
-| Evaluation suite | `evaluation/` — `shift`, `leakage`, `localization` |
+| Evaluation suite | `evaluation/` — `shift`, `concepts`, `leakage`, `localization`, `keypoint_distance`, `part_iou`, `faithfulness` |
 | Results store | `results.py` — JSONL, one row per (run_id, seed) |
 | Analysis | `analysis.py` — seed aggregation, effects models, Pareto frontiers, effective robustness |
 
@@ -45,10 +51,10 @@ cbm-eval analyze --results results/synthetic.jsonl --metric shift.test.wga --fro
 |---|---|---|
 | Discovery | `llm`, `vlm`, `kb`, `sae`, `dataset`, `static` | `discover(ctx) -> ConceptSet` |
 | Filtering (chained) | `rules`, `clip`, `dino`, `select` | `filter(concepts, ctx) -> ConceptSet` |
-| Generation | `scores`, `embeddings` (CEM), `boc` | `build(in_dim, aligned) -> ConceptLayer` |
+| Generation | `scores`, `logits`, `embeddings` (CEM), `boc` | `build(in_dim, aligned) -> ConceptLayer` |
 | Alignment | `clip`, `weights`, `dino`, `human` | `fit(concepts, ctx) -> AlignedConcepts` |
 | Predictor | `sparse`, `dense`, `residual` | `build(rep_dim, n_classes, feat_dim) -> PredictorHead` |
-| Training | `independent`, `sequential`, `joint` | `fit(layer, head, aligned, ctx) -> log` |
+| Training | `independent`, `sequential`, `joint` (+ `*_weighted`: imbalance-weighted concept BCE) | `fit(layer, head, aligned, ctx) -> log` |
 
 How the stages divide the work:
 
@@ -56,12 +62,23 @@ How the stages divide the work:
   (teacher image–text similarity, as in Label-free CBM); `dino` uses binary pseudo-labels from an
   open-vocabulary detector; `human` uses dataset annotations; `weights` fixes each neuron to the
   concept's text embedding (or SAE direction) with no targets.
-- **Generation** decides what the predictor sees: the concept score, a CEM-style embedding mixed by
+- **Generation** decides what the predictor sees: the concept score (`scores`: probabilities for
+  binary concepts; `logits`: their logits, as Koh et al. connect f), a CEM-style embedding mixed by
   concept probability, or a hard 0/1 bit (straight-through in joint training).
+- **Training** fits on cached frozen features by default. With `finetune: {epochs, lr, optimizer,
+  momentum, weight_decay, lr_step, lr_gamma, batch_size, patience, augment, num_workers}` it also
+  trains the backbone end to end (backbones with `trainable = True`: `inception`, `toy`): images go
+  through a trainable copy of the encoder, optimized with the concept layer (x → c phase of
+  `independent`/`sequential`) or with layer and head (`joint`). Afterwards the run's inputs, and so
+  every evaluator, use the fine-tuned encoder's features; it is saved as `runs/<run>/encoder.pt`.
+  Not combinable with `instances:` or patch-reading evaluators (`localization`, `keypoint_distance`,
+  `part_iou`).
 - Non-CLIP backbones need a text-capable `teacher:` for `clip` alignment and the `clip`/`select`
   filters (see `configs/ablations/waterbirds_backbones.yaml`).
+<!-- --8<-- [end:layout] -->
 
 ## Instance bags (SEG-MIL-CBM)
+<!-- --8<-- [start:instances] -->
 
 [arXiv 2510.04180](https://arxiv.org/abs/2510.04180) classifies an image from a *bag* of
 concept-guided segments. A top-level `instances:` key turns on bags, and every stage runs per
@@ -93,8 +110,32 @@ meaningful.
 
 Training stays on CPU unless `training.device` is set; the SEG-MIL anchors use `device: auto`
 (GPU when present). Segmentation and encoding run on the top-level `device`.
+<!-- --8<-- [end:instances] -->
+
+## Part localization (CUB)
+<!-- --8<-- [start:parts] -->
+
+`keypoint_distance` and `part_iou` re-implement the ProtoCBM localization metrics
+([pascal0012/ProtoCBM](https://github.com/pascal0012/ProtoCBM), `localization/`). Concept maps are
+the concept layer on patch features, a patch bag's per-patch scores, or, for segment bags, the
+best covering segment per patch. For each image and part group, `select: argmax` (the default)
+scores the group's concept with the highest image-level score. `select: present` averages over
+every concept annotated present. Annotations go through the backbone's resize and center crop and
+are cached under `paths.cache/parts/`.
+
+| Evaluator | Metrics | Options |
+|---|---|---|
+| `keypoint_distance` | `dist` (map peak → nearest visible keypoint, in image sides; mean over the 12 groups), `dist.<group>`, `pck` (share within `threshold`), `dist_center` / `pck_center` (a map that points at the center) | `select`, `threshold: 0.1` |
+| `part_iou` | `miou` (over all image–group pairs), `iou.<group>` for the 8 mask groups, `miou_center` (center prior) | `select`, `hard: true`, `keep_ratio: 0.5`, `seg_size: 56` |
+
+Differences from ProtoCBM: the peak is the center of the top patch rather than the argmax of a
+bilinear upsample (the same up to sub-patch rounding, but without the corner bias of clamped
+borders). Distances are normalized by the image side rather than measured in pixels. IoU is
+computed at `seg_size` rather than at full image resolution.
+<!-- --8<-- [end:parts] -->
 
 ## Configs
+<!-- --8<-- [start:configs] -->
 
 An anchor fully specifies one run. Each stage is `{name: <variant>, **kwargs}`, and the kwargs go
 straight to the variant's constructor. An ablation names an anchor and a set of factors:
@@ -113,11 +154,20 @@ A factor value **replaces** whatever sits at that key. For example, `stages.trai
 drops any `epochs` the anchor set, so constructor defaults apply. To vary one parameter, use a
 dotted key instead.
 
+In `grid` mode, a dotted key is applied to every combination. With both `stages.predictor: [{name:
+sparse}, {name: dense}]` and `stages.predictor.lam: [...]`, `lam` is also written into the `dense`
+spec, which rejects it. Put the parameter inside the spec (`{name: sparse, lam: 0.001}`) or split
+the sweep into two ablations.
+
 The `run_id` is a hash of everything that defines the model and its evaluation. Seed, name, paths
 and tags are excluded. Sweeps skip `(run_id, seed)` pairs that already succeeded, so an interrupted
-sweep can simply be restarted.
+sweep can simply be restarted. The hash covers the config, not the code: after changing how a
+variant behaves, re-run with `--force` or write to a new `paths.results` file, or the sweep will
+skip those runs and keep the old numbers. Each row records `git_commit` to tell versions apart.
+<!-- --8<-- [end:configs] -->
 
 ## Adding a component
+<!-- --8<-- [start:adding] -->
 
 ```python
 from cbm_eval.registry import FILTERING
@@ -135,13 +185,43 @@ class MyFilter(Filter):
 
 Import the module from its package `__init__.py`. It then becomes available as `{name: my_filter, threshold: 0.3}`.
 
+A new loss is a training subclass that overrides one hook, `_task_loss(logits, batch)` or
+`_concept_loss(layer, batch)`, registered under its own name:
+
+```python
+import torch.nn.functional as F
+
+from cbm_eval.registry import TRAINING
+from cbm_eval.stages.training import Joint
+
+@TRAINING.register("joint_smooth")
+class JointSmooth(Joint):
+    def __init__(self, smoothing: float = 0.1, **kw):
+        super().__init__(**kw)
+        self.smoothing = smoothing
+
+    def _task_loss(self, logits, b):
+        return F.cross_entropy(logits, b.y, label_smoothing=self.smoothing)
+```
+
+See `CLAUDE.md` for the full contract per component kind.
+<!-- --8<-- [end:adding] -->
+
 ## Data
+<!-- --8<-- [start:data] -->
 
 Point `dataset.root` at:
 
 - **Waterbirds**: the standard folder with `metadata.csv` (`img_filename, y, split, place`).
-- **CUB**: the official `CUB_200_2011` directory. Attributes are class-level majority-voted
-  (Koh et al.) by default. Each attribute is mapped to its body part's keypoint for localization.
+- **CUB**: the official `CUB_200_2011` directory. Attributes are class-level majority-voted by
+  default (`majority_vote: mean`: >= 50% of the class's official-train images, counting "not
+  visible" as absent; 93 concepts). `majority_vote: koh` follows Koh et al.'s code (train split only,
+  "not visible" negatives ignored, ties -> present; 112 concepts), and `split_dir:` takes their
+  `CUB_processed/class_attr_data_10` folder (Codalab worksheet 0x362911581fcd4e048ddfd84f47203fd2)
+  to use their train/val split. Each attribute is mapped to its body part's keypoint for localization.
+  Optional part segmentations for `part_iou` (CUB70, 67 classes):
+  `wget https://github.com/hamedbehzadi/CUB70-PartSegmentationDataset/raw/main/AnnotationMasksPerclass.tar.xz`,
+  then extract to `<root>/part_segmentations/` (or set `dataset.part_segmentations`).
 - **MetaShift**: a folder with `metadata.csv` (`filename, y, a, split`), as produced by the
   SubpopBench preprocessing scripts.
 
@@ -151,14 +231,21 @@ LLM, VLM, ConceptNet and Grounding DINO outputs are cached under the same direct
 
 `llm` and `vlm` discovery call Claude (`claude-opus-5-5` by default; override with `model:`). Server-side
 refusal fallback is enabled. Credentials come from `ANTHROPIC_API_KEY` or an `ant auth login` profile.
+A response cut off at `max_tokens` (default 4000) raises instead of being cached; raise it with
+`{name: llm, max_tokens: 8000}`.
+<!-- --8<-- [end:data] -->
 
 ## Metrics
+<!-- --8<-- [start:metrics] -->
 
 All metrics are prefixed by their evaluator name, e.g. `shift.test.wga`.
 
 - `shift`: per-split accuracy, per-group accuracy, worst-group accuracy (`wga`) and mean group
   accuracy. Effective robustness is reported when a `baseline: {slope, intercept}` is given.
   Otherwise, fit one over baseline runs with `analysis.fit_robustness_baseline`.
+- `concepts`: `<split>.concept_error` (1 - accuracy of `c_hat >= 0.5` vs. annotations, as in
+  Koh et al.'s Table 2), `<split>.concept_f1` and the annotations' `positive_rate`. Binary
+  concept layers whose concepts are all annotated only.
 - `leakage`:
   - `intervention.acc@f` / `intervention.gain`: accuracy after replacing a random fraction `f` of
     concept predictions with ground truth. Ground truth is human annotations when every concept is
@@ -169,7 +256,9 @@ All metrics are prefixed by their evaluator name, e.g. `shift.test.wga`.
 - `localization`: pointing game and locality (map mass inside the annotated region, with
   `locality_chance` for reference). Only concepts that match an annotated dataset concept by name
   are scored.
+<!-- --8<-- [end:metrics] -->
 
+<!-- --8<-- [start:status] -->
 ## Status
 
 The whole pipeline and every stage variant are tested end-to-end on the synthetic dataset and toy
@@ -179,3 +268,4 @@ and stub LLM/VLM clients.
 **Not yet run against real data or pretrained weights:** OpenCLIP and DINOv2 feature extraction
 (including ViT patch tokens), the CUB and MetaShift loaders, live Claude/ConceptNet calls, and
 Grounding DINO scoring. Expect small fixes on first contact.
+<!-- --8<-- [end:status] -->

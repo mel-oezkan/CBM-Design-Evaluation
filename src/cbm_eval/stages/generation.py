@@ -18,6 +18,20 @@ class ScoreLayer(ConceptLayer):
         return c_hat
 
 
+class LogitScoreLayer(ConceptLayer):
+    """The predictor sees concept logits rather than probabilities: Koh et al. (2020) connect f to
+    the logits for sequential and joint CBMs. ``c_hat`` stays a probability (so interventions keep
+    working); it is mapped back with ``logit`` clamped at ``eps``, so intervened 0/1 values become
+    +-logit(1 - eps) instead of Koh et al.'s 5th/95th-percentile logits."""
+
+    def __init__(self, in_dim, aligned, eps: float):
+        super().__init__(in_dim, aligned)
+        self.rep_dim, self.eps = self.n_concepts, eps
+
+    def represent(self, c_hat, x):
+        return torch.logit(c_hat, eps=self.eps) if self.target_type == "binary" else c_hat
+
+
 class BagOfConceptsLayer(ConceptLayer):
     """Hard 0/1 concept presence; straight-through gradients during joint training."""
 
@@ -53,6 +67,15 @@ class EmbeddingLayer(ConceptLayer):
 class Scores(Generation):
     def build(self, in_dim: int, aligned: AlignedConcepts) -> ConceptLayer:
         return ScoreLayer(in_dim, aligned)
+
+
+@GENERATION.register("logits")
+class LogitScores(Generation):
+    def __init__(self, eps: float = 1e-6):
+        self.eps = eps
+
+    def build(self, in_dim, aligned):
+        return LogitScoreLayer(in_dim, aligned, self.eps)
 
 
 @GENERATION.register("boc")

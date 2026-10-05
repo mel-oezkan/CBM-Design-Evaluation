@@ -48,6 +48,12 @@ class PipelineBuilder:
         if self.instances is not None and not self.predictor.supports_bags:
             raise ValueError(f"`instances: {cfg.instances['name']}` gives each image a bag of instances; "
                              f"use a bag-aware predictor such as {{name: mil}}, not '{st['predictor']['name']}'")
+        if self.training.trains_backbone:
+            patchy = [n for n, e in self.evaluators.items() if e.needs_patches]
+            if self.instances is not None or patchy:
+                raise ValueError("`stages.training.finetune` changes the backbone, but "
+                                 + ("`instances:`" if self.instances is not None else f"evaluators {patchy}")
+                                 + " read frozen patch features; drop them or remove `finetune:`")
 
     def context(self) -> Context:
         dataset = DATASETS.build(self.cfg.dataset)
@@ -71,12 +77,22 @@ class PipelineBuilder:
         return concepts
 
     def train(self, ctx: Context, concepts: ConceptSet) -> TrainedCBM:
+        ctx.use_encoder(None)  # a reused Context must not carry a previous run's fine-tuned encoder
         aligned = self.alignment.fit(concepts, ctx)
         layer = self.generation.build(ctx.feat_dim, aligned)
         head = self.predictor.build(layer.rep_dim, ctx.num_classes, ctx.feat_dim)
-        train_log = self.training.fit(layer, head, aligned, ctx)
+        encoder = None
+        if self.training.trains_backbone:
+            if not ctx.backbone.trainable:
+                raise ValueError(f"`stages.training.finetune` needs a trainable backbone; "
+                                 f"'{self.cfg.backbone['name']}' is frozen-only (use e.g. inception)")
+            encoder = ctx.backbone.encoder()
+            train_log = self.training.fit(layer, head, aligned, ctx, encoder=encoder)
+            ctx.use_encoder(encoder.eval(), num_workers=self.training.num_workers)  # inputs = fine-tuned features
+        else:
+            train_log = self.training.fit(layer, head, aligned, ctx)
         train_log |= {f"head.{k}": v for k, v in head.stats().items()}
-        cbm = TrainedCBM(CBM(layer, head).eval(), aligned, self.cfg.to_dict(), train_log)
+        cbm = TrainedCBM(CBM(layer, head).eval(), aligned, self.cfg.to_dict(), train_log, encoder=encoder)
         cbm.cache_scores(ctx)
         return cbm
 

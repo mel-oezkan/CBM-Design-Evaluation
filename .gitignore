@@ -6,3 +6,5 @@ __pycache__/
 /results/
 /data/
 .pytest_cache/
+/.claude/skills/modal/
+/site/

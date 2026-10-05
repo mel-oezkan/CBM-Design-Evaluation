@@ -82,14 +82,16 @@ class LLMDiscovery(Discovery):
     """Per-class prompting in the style of Label-free CBM / LaBo."""
 
     def __init__(self, prompts: list[str] | None = None, per_class: int = 10, model: str | None = None,
-                 effort: str = "medium", client=None):
+                 effort: str = "medium", max_tokens: int = 4000, client=None):
         self.prompts = prompts or ["features", "around", "superclass"]
         self.per_class, self.model, self.effort, self.client = per_class, model, effort, client
+        self.max_tokens = max_tokens
 
     def _client(self, ctx):
         if self.client is None:
             kw = {"model": self.model} if self.model else {}
-            self.client = ClaudeClient(effort=self.effort, cache_dir=ctx.cache_dir / "llm", **kw)
+            self.client = ClaudeClient(effort=self.effort, max_tokens=self.max_tokens,
+                                       cache_dir=ctx.cache_dir / "llm", **kw)
         return self.client
 
     def discover(self, ctx):
@@ -112,14 +114,15 @@ class VLMDiscovery(Discovery):
               "would help recognize it." + _LIST_SUFFIX)
 
     def __init__(self, images_per_class: int = 4, per_class: int = 15, model: str | None = None,
-                 effort: str = "medium", client=None):
+                 effort: str = "medium", max_tokens: int = 4000, client=None):
         self.images_per_class, self.per_class = images_per_class, per_class
-        self.model, self.effort, self.client = model, effort, client
+        self.model, self.effort, self.max_tokens, self.client = model, effort, max_tokens, client
 
     def discover(self, ctx):
         if self.client is None:
             kw = {"model": self.model} if self.model else {}
-            self.client = ClaudeClient(effort=self.effort, cache_dir=ctx.cache_dir / "vlm", **kw)
+            self.client = ClaudeClient(effort=self.effort, max_tokens=self.max_tokens,
+                                       cache_dir=ctx.cache_dir / "vlm", **kw)
         train = ctx.split("train")
         if not train.paths or train.paths[0] is None:
             raise RuntimeError("VLM discovery needs a dataset with image files")

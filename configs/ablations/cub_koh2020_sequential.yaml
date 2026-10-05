@@ -1,0 +1,11 @@
+# Koh et al. 2020, FROZEN backbone (sequential): remove one Koh-fidelity option at a time from the anchor, to measure how
+# much each matters within cbm_eval (the pipeline's own defaults are the alternatives).
+anchor: ../anchors/cub_koh2020_sequential.yaml
+mode: ofat
+seeds: [1, 2, 3]
+overrides: {stages.training.finetune: null}  # frozen arm; the anchor itself is the fine-tuned reproduction
+factors:
+  dataset.majority_vote: [mean]            # pipeline default vote: 93 concepts, labels differ from Koh's
+  dataset.split_dir: [null]                # pipeline's own 90/10 train/val split
+  stages.generation: [{name: scores}]      # sigmoid probabilities into the head instead of logits
+  stages.training.name: [sequential]               # unweighted concept BCE

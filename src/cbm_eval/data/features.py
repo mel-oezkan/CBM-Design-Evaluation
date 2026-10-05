@@ -49,3 +49,16 @@ def load_features(dataset: ImageDataset, backbone, split: str, cache_dir: str | 
     path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(data, path)
     return FeatureSplit(**data)
+
+
+@torch.no_grad()
+def encode_split(images, encoder: torch.nn.Module, device, batch_size: int = 128,
+                 num_workers: int = 0) -> torch.Tensor:
+    """(N, D) features of an image dataset (``Context.image_split``) under ``encoder`` in eval mode;
+    used for a fine-tuned encoder, whose features are run-specific and so are not cached on disk."""
+    was_training = encoder.training
+    encoder.eval()
+    loader = DataLoader(images, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+    feats = [encoder(batch["image"].to(device)).float().cpu() for batch in loader]
+    encoder.train(was_training)
+    return torch.cat(feats)

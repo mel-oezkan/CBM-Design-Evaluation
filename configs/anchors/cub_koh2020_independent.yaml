@@ -1,0 +1,25 @@
+# Koh et al. 2020, CUB, INDEPENDENT bottleneck (Table 1: 0.240 task error, Table 2: 0.034 concept error):
+# the c -> y head is trained on the true concepts and tested on sigmoid concept probabilities,
+# hence `generation: scores` (probabilities) rather than `logits`.
+# The x -> c phase fine-tunes Inception-v3 end to end with Koh et al.'s x -> c settings (SGD, lr 0.01,
+# momentum 0.9, weight decay 4e-5, batch 64; same loss scale as theirs). Data and gaps as in
+# cub_koh2020.yaml (joint).
+name: cub_koh2020_independent
+dataset: {name: cub, root: data/CUB_200_2011, majority_vote: koh, split_dir: data/CUB_processed/class_attr_data_10}
+backbone: {name: inception}
+stages:
+  discovery: {name: dataset}
+  filtering: [{name: rules, remove_class_names: false, max_words: 10}]
+  generation: {name: scores}
+  alignment: {name: human}
+  predictor: {name: dense}
+  training:
+    name: independent_weighted
+    device: auto
+    finetune: {epochs: 300, lr: 0.01, optimizer: sgd, momentum: 0.9, weight_decay: 0.00004, batch_size: 64,
+               patience: 30, num_workers: 8}
+evaluation:
+  - {name: shift, splits: [test]}
+  - {name: concepts}
+  - {name: leakage}
+paths: {cache: .cache, runs: runs/cub_koh2020, results: results/cub_koh2020.jsonl}

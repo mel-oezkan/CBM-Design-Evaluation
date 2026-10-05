@@ -1,4 +1,4 @@
-"""Hugging Face Grounding DINO and SAM wrappers (``pip install cbm-eval[hf]``), loaded on first use.
+"""Hugging Face Grounding DINO and SAM wrappers (``uv sync --extra hf``), loaded on first use.
 
 Used by the ``grounding_dino`` concept scorer and the segment instance sources. Both classes take
 PIL images and return boxes / masks in pixel coordinates of the original image.
