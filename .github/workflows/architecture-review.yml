@@ -1,0 +1,48 @@
+# Runs the architecture reviewer (.claude/agents/architecture-reviewer.md) on every commit of a PR
+# and posts its report as a PR comment. Advisory: it does not fail the build.
+# Needs the repository secret ANTHROPIC_API_KEY.
+name: Architecture review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: architecture-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Install dependencies
+        run: uv sync
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Read .claude/agents/architecture-reviewer.md and act as that reviewer, following its
+            instructions exactly.
+
+            Target: PR #${{ github.event.pull_request.number }} in ${{ github.repository }},
+            commit range ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}.
+
+            When the report is complete, post it as one PR comment with
+            `gh pr comment ${{ github.event.pull_request.number }} --body-file <file>`
+            (write the report to a file first). Do not edit, commit or push anything.
+          claude_args: |
+            --allowedTools "Read,Grep,Glob,Write,Bash(git log:*),Bash(git show:*),Bash(git diff:*),Bash(git status:*),Bash(uv run pytest:*),Bash(uv run cbm-eval list:*),Bash(uv run --group docs properdocs build:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh issue list:*)"
