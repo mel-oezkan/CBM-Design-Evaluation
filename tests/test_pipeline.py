@@ -113,6 +113,47 @@ def test_sweep_skips_existing_and_records_failures(base_cfg):
     assert len(store.load(include_failed=True)) == 2
 
 
+def _count_contexts(monkeypatch) -> list:
+    built, context = [], PipelineBuilder.context
+    monkeypatch.setattr(PipelineBuilder, "context", lambda self: built.append(context(self)) or built[-1])
+    return built
+
+
+def test_sweep_shares_a_context_without_changing_results(base_cfg, monkeypatch):
+    cheap = base_cfg.with_overrides({"evaluation": [{"name": "shift"}, {"name": "leakage", "repeats": 2}]})
+    configs = [cheap, cheap.with_overrides({"stages.predictor": {"name": "dense"}}), cheap.with_overrides({"seed": 1}),
+               cheap.with_overrides({"stages.training": {"name": "joint", "epochs": 10}})]
+    run(cheap, save=False)  # a cold feature cache draws from the global RNG; warm it for both sides
+    alone = [run(cfg, save=False).metrics for cfg in configs]
+    built = _count_contexts(monkeypatch)
+    status = sweep(configs, ResultsStore(base_cfg.paths["results"]), save=False)
+    assert len(built) == 1
+    for s, m in zip(status, alone):
+        assert {k: s[k] for k in m} == m  # equal, not close
+
+
+def test_sweep_does_not_share_a_context_that_drew_random_numbers(base_cfg, monkeypatch):
+    from cbm_eval.backbones.toy import ToyBackbone
+
+    init = ToyBackbone.__init__
+    monkeypatch.setattr(ToyBackbone, "__init__", lambda self, **kw: (torch.rand(1), init(self, **kw))[1])
+    built = _count_contexts(monkeypatch)
+    cheap = base_cfg.with_overrides({"evaluation": [{"name": "shift"}]})
+    sweep([cheap, cheap.with_overrides({"seed": 1})], ResultsStore(base_cfg.paths["results"]), save=False)
+    assert len(built) == 2 and all(ctx.key is None for ctx in built)
+
+
+def test_context_key_separates_what_the_context_reads(base_cfg):
+    key = lambda **o: PipelineBuilder(base_cfg.with_overrides(o)).context_key()
+    assert key() == key(**{"stages.predictor": {"name": "dense"}}) == key(seed=3)
+    assert key() != key(**{"dataset.sizes.train": 300})
+    assert key() != key(evaluation=[{"name": "shift"}])  # no evaluator reads patch features
+    assert key(evaluation=[], **{"stages.training.finetune": {"epochs": 1}}) is None
+    ctx = PipelineBuilder(base_cfg).context()
+    with pytest.raises(ValueError, match="another dataset"):
+        PipelineBuilder(base_cfg.with_overrides({"dataset.sizes.train": 300})).reuse(ctx)
+
+
 HUMAN = {"stages.alignment": {"name": "human"}}
 
 

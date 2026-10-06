@@ -10,7 +10,8 @@
 #   by 1 + lambda * 112 = 2.12 and we do not, so the encoder lr is 0.001 / 2.12.
 # Remaining gaps:
 #   - model selection: early stopping on the val loss (ours) vs. up to 1000 epochs, retrained on
-#     train+val and picked by training accuracy (theirs); concept layer and head use Adam (ours) vs. SGD;
+#     train+val and picked by training accuracy (theirs); concept layer and head use Adam (ours) vs. SGD
+#     (`stages.training.optimizer: sgd` expresses theirs; not set, to keep this anchor's run id);
 #   - no auxiliary Inception head (theirs: 0.4 x aux loss); ImageNet input normalization (theirs:
 #     mean 0.5 / std 2); eval images resized to 299 (theirs: center crop without resizing);
 #   - interventions (leakage evaluator) replace random single concepts, not visibility-aware groups.

@@ -54,7 +54,8 @@ Each anchor's header comment lists what matches the paper and what does not.
 - **Model selection:** early stopping on the validation loss, versus up to 1000 epochs retrained
   on train+val and selected by training accuracy.
 - **Optimizers:** the concept layer and head use Adam; the paper uses SGD throughout. The encoder
-  uses SGD as in the paper.
+  uses SGD as in the paper. `stages.training.optimizer: sgd` (with `momentum`, `weight_decay`)
+  expresses the paper's choice; the anchors don't set it yet, so their run ids and results stay as they are.
 - **Inputs:** no auxiliary Inception head (the paper adds 0.4 × the auxiliary loss); ImageNet
   normalization instead of mean 0.5 / std 2; evaluation images are resized to 299 rather than
   center-cropped.

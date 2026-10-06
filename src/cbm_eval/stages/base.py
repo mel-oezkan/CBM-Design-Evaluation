@@ -95,6 +95,7 @@ class ConceptLayer(nn.Module):
             self.linear.requires_grad_(False)
 
     rep_dim: int
+    represent_uses_x: bool = True  # False when ``represent`` ignores ``x`` (training then drops the features)
 
     def fit_input_stats(self, x: torch.Tensor, bag: Bag | None = None) -> None:
         x = instance_rows(x, bag)
@@ -114,7 +115,12 @@ class ConceptLayer(nn.Module):
 
     def concept_logits(self, x: torch.Tensor) -> torch.Tensor:
         """Raw per-concept scores; works on (N, D) features and (N, P, D) patch features alike."""
-        return (self.linear(self.normalize(x)) - self.c_mean) / self.c_std
+        return self.logits_from_normalized(self.normalize(x))
+
+    def logits_from_normalized(self, x_norm: torch.Tensor) -> torch.Tensor:
+        """``concept_logits`` of features already passed through ``normalize`` (training normalizes
+        frozen features once). Override this, not ``concept_logits``, to change the scores."""
+        return (self.linear(x_norm) - self.c_mean) / self.c_std
 
     def activate(self, logits: torch.Tensor) -> torch.Tensor:
         return torch.sigmoid(logits) if self.target_type == "binary" else logits
@@ -155,13 +161,14 @@ class Generation(ABC):
 class PredictorHead(nn.Module):
     """Concept representation (+ optionally raw features) -> class logits.
 
-    ``optimizer``/``lr`` override the training stage's optimizer for this head's parameters
+    ``optimizer``/``lr`` override the training stage's ``optimizer``/``lr`` for this head's parameters
     (sparse heads need plain SGD so the proximal step is a true proximal-gradient update).
     ``bag`` is set when inputs are (N, M, ·) instance bags; only bag-aware heads pool over M.
     """
 
-    optimizer: str = "adam"
+    optimizer: str | None = None  # None: the training stage's optimizer
     lr: float | None = None
+    uses_features: bool = True  # False when ``forward`` ignores ``x_norm`` (training then passes None)
 
     def forward(self, rep: torch.Tensor, x_norm: torch.Tensor, bag: Bag | None = None) -> torch.Tensor:
         raise NotImplementedError

@@ -11,6 +11,8 @@ from .base import Predictor, PredictorHead
 
 
 class LinearHead(PredictorHead):
+    uses_features = False
+
     def __init__(self, rep_dim: int, num_classes: int):
         super().__init__()
         self.linear = nn.Linear(rep_dim, num_classes)

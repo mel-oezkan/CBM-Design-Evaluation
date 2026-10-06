@@ -71,6 +71,19 @@ class Bag:
         """(N, M, D) -> the (n_real, D) rows of real instances."""
         return x[self.mask]
 
+    @property
+    def padded(self) -> bool:
+        return not bool(self.mask.all())
+
+    def on_rows(self, fn, x: torch.Tensor) -> torch.Tensor:
+        """(N, M, D) -> ``fn`` of the (n_real, D) real rows, scattered back to (N, M, ...) with zeros in the
+        padding. Computes per-instance work on the real instances only; every reader of a bag masks the
+        padding, so only the cost changes."""
+        rows = fn(self.rows(x))
+        out = rows.new_zeros(*self.mask.shape, *rows.shape[1:])
+        out[self.mask] = rows
+        return out
+
     def mean(self, values: torch.Tensor) -> torch.Tensor:
         """Mean of (N, M) per-instance values over real instances."""
         m = self.mask.to(values.dtype)

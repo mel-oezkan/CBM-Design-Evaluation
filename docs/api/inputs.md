@@ -1,3 +1,7 @@
+---
+toc_collapse: 2
+---
+
 # Data, backbones, instances
 
 ::: cbm_eval.data.base

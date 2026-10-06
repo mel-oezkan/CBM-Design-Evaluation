@@ -31,6 +31,8 @@ theme:
 # Colours come from the repo's architecture diagram: lilac = stage modules, green = evaluation,
 # warm grey = infrastructure. Everything visual lives in this one stylesheet.
 extra_css: [stylesheets/extra.css]
+# Collapsible TOC on pages whose front matter sets ``toc_collapse``.
+extra_javascript: [javascripts/toc-collapse.js]
 
 markdown_extensions:
   - admonition
@@ -67,20 +69,23 @@ plugins:
             filters: ["!^_"]
 
 # Top-level entries are the header tabs: a first walkthrough, then one chapter each for how it
-# works, running studies, and extending the code.
+# works, examples of running studies, and extending the code.
 nav:
   - Home: index.md
   - Getting started: getting-started.md
   - Architecture:
-      - Overview: architecture.md
+      - How a run works: how-it-works.md
+      - Training: training.md
+      - Pipeline map: architecture.md
       - Component catalogue: components.md
+      - Config reference: configs.md
       - Data: data.md
       - Metrics: metrics.md
-  - Experiments:
-      - Configs and sweeps: configs.md
-      - Instance bags (SEG-MIL-CBM): instance-bags.md
       - Part localization (CUB): part-localization.md
-      - "Reproduction: Koh et al. 2020": koh2020_reproduction.md
+  - Experiments:
+      - Designing an experiment: experiments.md
+      - "Example: SEG-MIL-CBM": instance-bags.md
+      - "Example: Koh et al. 2020": koh2020_reproduction.md
   - Extending:
       - Contributing: contributing.md
   - API reference:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +20,7 @@ from .registry import (ALIGNMENT, BACKBONES, DATASETS, DISCOVERY, EVALUATION, FI
                        INSTANCES, PREDICTOR, TRAINING)
 from .results import ResultsStore, make_row
 from .structures import ConceptSet
-from .utils import seed_everything
+from .utils import rng_state, seed_everything, stable_hash
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +35,7 @@ class RunResult:
     metrics: dict[str, float]
     concept_trace: list[tuple[str, int]]  # (stage, n_concepts) after each step
     run_dir: Path | None = None
+    ctx: Context | None = field(default=None, repr=False)  # the run's context (``sweep`` hands it on)
 
 
 class PipelineBuilder:
@@ -74,15 +75,42 @@ class PipelineBuilder:
             if "test" not in DATASETS.get(spec["name"]).splits:
                 raise ValueError(f"`eval_datasets.{alias}`: dataset '{spec['name']}' has no test split")
 
+    def _need_patches(self) -> bool:
+        return any(e.needs_patches for e in self.evaluators.values()) or \
+            bool(self.instances is not None and self.instances.needs_patches)
+
     def context(self) -> Context:
+        before = rng_state()
         dataset = DATASETS.build(self.cfg.dataset)
         backbone = BACKBONES.build(self.cfg.backbone)
         teacher = BACKBONES.build(self.cfg.teacher) if self.cfg.teacher else None
         eval_datasets = {alias: DATASETS.build(spec) for alias, spec in (self.cfg.eval_datasets or {}).items()}
-        need_patches = any(e.needs_patches for e in self.evaluators.values()) or \
-            bool(self.instances is not None and self.instances.needs_patches)
-        return Context(self.cfg, dataset, backbone, teacher, need_patches=need_patches, instances=self.instances,
-                       eval_datasets=eval_datasets)
+        ctx = Context(self.cfg, dataset, backbone, teacher, need_patches=self._need_patches(),
+                      instances=self.instances, eval_datasets=eval_datasets)
+        # Shareable only if building it drew no random numbers (e.g. a backbone that initializes a network
+        # before loading its weights does): a run on a reused context skips those draws, which would
+        # shift every later one, such as the concept layer's initialization.
+        ctx.key = self.context_key() if rng_state() == before else None
+        return ctx
+
+    def context_key(self) -> str | None:
+        """Everything ``context()`` reads from the config: runs with equal keys can share one Context
+        (``sweep`` does). None when the run fine-tunes the backbone, whose trainable encoder may be
+        built lazily from the global RNG, so a reused backbone would shift the run's random draws."""
+        if self.training.trains_backbone:
+            return None
+        c = self.cfg
+        return stable_hash({"dataset": c.dataset, "backbone": c.backbone, "teacher": c.teacher,
+                            "eval_datasets": c.eval_datasets, "instances": c.instances, "device": c.device,
+                            "cache": c.paths["cache"], "need_patches": self._need_patches()})
+
+    def reuse(self, ctx: Context) -> Context:
+        """A context built for an earlier run, handed to this one."""
+        key = self.context_key()
+        if key is not None and ctx.key is not None and key != ctx.key:
+            raise ValueError("The context passed to `run` was built for another dataset, backbone, teacher, "
+                             "eval_datasets, instances, device or cache path; pass ctx=None to build one")
+        return ctx.for_run(self.cfg)
 
     def concepts(self, ctx: Context, trace: list[tuple[str, int]] | None = None) -> ConceptSet:
         concepts = self.discovery.discover(ctx)
@@ -161,7 +189,7 @@ def run(cfg: ExperimentConfig, store: ResultsStore | None = None, save: bool = T
     seed_everything(cfg.seed)
     start = time.time()
     builder = PipelineBuilder(cfg)
-    ctx = ctx or builder.context()
+    ctx = builder.context() if ctx is None else builder.reuse(ctx)
     trace: list[tuple[str, int]] = []
     concepts = builder.concepts(ctx, trace)
     cbm = builder.train(ctx, concepts)
@@ -173,7 +201,7 @@ def run(cfg: ExperimentConfig, store: ResultsStore | None = None, save: bool = T
     if store is not None:
         store.append(make_row(cfg, metrics, cbm.train_log, trace, time.time() - start))
     log.info("run %s seed %d: %s", cfg.run_id, cfg.seed, _headline(metrics))
-    return RunResult(cfg, cbm, metrics, trace, run_dir)
+    return RunResult(cfg, cbm, metrics, trace, run_dir, ctx)
 
 
 def evaluate_saved(run_dir: str | Path, overrides: dict[str, Any] | None = None,
@@ -211,17 +239,29 @@ def evaluate_saved(run_dir: str | Path, overrides: dict[str, Any] | None = None,
 
 def sweep(configs: list[ExperimentConfig], store: ResultsStore, skip_existing: bool = True,
           save: bool = True, continue_on_error: bool = True) -> list[dict[str, Any]]:
-    """Run many configs, reusing feature caches (they key on dataset+backbone, not on the run)."""
-    status = []
+    """Run many configs, reusing feature caches (they key on dataset+backbone, not on the run).
+
+    Consecutive configs with the same ``PipelineBuilder.context_key`` share one Context, so the
+    dataset, backbone, features and text embeddings are loaded once per group. Results are identical
+    (on CPU) to running each config on its own (``context()`` refuses to share a context whose construction
+    drew random numbers), and only one context is held at a time.
+    """
+    status, ctx = [], None
     for i, cfg in enumerate(configs, 1):
         if skip_existing and store.has(cfg.run_id, cfg.seed):
             status.append({"run_id": cfg.run_id, "seed": cfg.seed, "status": "skipped"})
             continue
         log.info("[%d/%d] %s seed %d", i, len(configs), cfg.run_id, cfg.seed)
         try:
-            res = run(cfg, store, save=save)
+            key = PipelineBuilder(cfg).context_key()
+            if ctx is not None and (key is None or key != ctx.key):
+                ctx = None  # a new group: free the previous context before the next one is built
+            res = run(cfg, store, save=save, ctx=ctx)
+            ctx = res.ctx if res.ctx.key is not None else None
             status.append({"run_id": cfg.run_id, "seed": cfg.seed, "status": "ok", **res.metrics})
+            del res
         except Exception as e:  # keep the sweep going; record the failure for the summary
+            ctx = None  # a failed run may have left the context half-filled
             if not continue_on_error:
                 raise
             log.exception("run %s failed", cfg.run_id)

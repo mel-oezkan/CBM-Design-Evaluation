@@ -17,6 +17,7 @@ from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import torch
 
 from ..registry import DATASETS
@@ -123,10 +124,11 @@ class CUB(ImageDataset):
         n_attr = len(all_attr_names)
         present = np.zeros((max(images) + 1, n_attr), dtype=np.int8)
         not_visible = np.zeros((max(images) + 1, n_attr), dtype=bool)
-        for row in _read(r / "attributes" / "image_attribute_labels.txt"):
-            img, attr, is_present = int(row[0]), int(row[1]) - 1, int(row[2])
-            present[img, attr] = is_present
-            not_visible[img, attr] = row[3] == "1"
+        # 3.7M lines: (image, attribute, is_present, certainty, time); some carry an extra column.
+        a = pd.read_csv(r / "attributes" / "image_attribute_labels.txt", sep=r"\s+", header=None,
+                        usecols=[0, 1, 2, 3], dtype=np.int64).to_numpy()
+        present[a[:, 0], a[:, 1] - 1] = a[:, 2]
+        not_visible[a[:, 0], a[:, 1] - 1] = a[:, 3] == 1  # certainty 1 = "not visible"
         split_of = self._assign_splits(images, is_train)
 
         if self.class_level_concepts:

@@ -1,8 +1,8 @@
 # CLAUDE.md
 
 Research code for a controlled design study of concept bottleneck models (CBMs). Read `README.md`
-for the stage catalogue, config format, caching and metrics; this file covers the rules for
-changing the code without breaking the architecture.
+for an overview and `docs/` for the stage catalogue, config format, caching and metrics; this
+file covers the rules for changing the code without breaking the architecture.
 
 ## Commands
 
@@ -89,12 +89,14 @@ Steps:
 5. If the component caches anything on disk (dataset, backbone, scorer, instance source), add it
    to `CASES` in `tests/test_cache_keys.py`: every constructor arg must change the key or be listed
    as exempt with a reason.
-6. Update the stage/variant tables in `README.md`, and add an ablation factor or anchor under
-   `configs/` if the variant is part of the study. The class docstring and constructor signature
-   are the variant's entry in the docs' component catalogue (`scripts/gen_component_docs.py`).
+6. Update the stage/variant tables in `docs/architecture.md` (and the summary in `README.md`),
+   and add an ablation factor or anchor under `configs/` if the variant is part of the study.
+   The class docstring and constructor signature are the variant's entry in the docs' component
+   catalogue (`scripts/gen_component_docs.py`).
 
-The docs pages under `docs/` include sections of `README.md` and `CLAUDE.md` through snippet
-section markers (HTML comments starting with `--8<--`); keep them when editing around them.
+The docs pages under `docs/` include sections of `README.md` (intro, status) and `CLAUDE.md`
+through snippet section markers (HTML comments starting with `--8<--`); keep them when editing
+around them.
 
 Kind-specific contracts:
 
@@ -109,13 +111,16 @@ Kind-specific contracts:
   same space as `encode_images`. Import optional heavy deps (`open_clip`, `transformers`) inside
   methods, not at module top level.
 - **Generation**: subclass `ConceptLayer`, implement `represent` and set `rep_dim`; concept
-  predictions stay in target space so interventions keep working.
+  predictions stay in target space so interventions keep working. Set `represent_uses_x = False`
+  if `represent` ignores `x`; change the scores in `logits_from_normalized`, not `concept_logits`. Don't override `forward`:
+  joint training composes `logits_from_normalized`, `activate` and `represent` itself.
 - **Predictor**: return a `PredictorHead`; use `penalty()`/`proximal_step()`/`phases()` hooks
-  rather than editing the training stages. Set `supports_bags = True` only if it pools over M.
+  rather than editing the training stages. Set `supports_bags = True` only if it pools over M, and
+  `uses_features = False` on the head only if `forward` ignores `x_norm`.
 - **Training**: must respect `layer.frozen`, `aligned.has_targets`, `head.optimizer/lr` and
   `head.phases()`; return a flat `dict[str, float]` log. Losses are hooks on the training base
   class: `_task_loss(logits, batch)` (cross-entropy) and `_concept_loss(layer, batch)` (selected by
-  `concept_loss:`). A new loss is a subclass of `Sequential`/`Joint`/`Independent` that overrides
+  `concept_loss:`, reading concept logits as `batch.concept_logits(layer)`). A new loss is a subclass of `Sequential`/`Joint`/`Independent` that overrides
   one hook and is registered under its own name; don't add a `loss:` string switch.
 - **Concept scorer**: if it caches scores, keep its output-relevant args in `self.kw` and build the
   key from `cache_key()` (see `GroundingDINOScorer`).
@@ -163,6 +168,21 @@ Kind-specific contracts:
   numbers only.
 - Experiment settings belong in YAML under `configs/`, not as changed defaults in code (which
   would also break the run_id invariant above).
+
+## Problems you find along the way
+
+Every problem you find that the current task doesn't fix becomes a GitHub issue in this repository
+(`gh issue create`): a bug, a crashing variant combination, a reproducibility gap, a cache-key
+hole, or a doc that contradicts the code. Mentioning it in a reply or a commit message is not
+enough. First check `gh issue list --search` for an existing issue and comment there instead of
+duplicating it. An issue states:
+
+- what goes wrong, with a minimal reproduction (a config or a few lines on the synthetic dataset and `toy` backbone);
+- where it happens (`file:line`) and, if known, the cause;
+- whether a fix would change existing results. If it would, existing runs need `--force` or a new
+  results file (see the reproducibility invariants above), so say which runs are affected.
+
+Then link the issue in your reply to the user, and in the PR or commit where the problem came up.
 
 ## Style
 
