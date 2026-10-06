@@ -1,0 +1,825 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CBM-Eval Speed-ups</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<style>
+/* Layout: one reading column (~70ch) on a cool lab-notebook ground; charts and tables break out to the
+   full column width; each proposal is a ruled entry keyed by its ID, with a results-contract chip. */
+:root {
+  color-scheme: light;
+  --bg: #f5f7fa;
+  --surface: #ffffff;
+  --ink: #12161d;
+  --ink-2: #485060;
+  --muted: #6f7787;
+  --rule: #dde2ea;
+  --rule-strong: #c4cbd6;
+  --accent: #2a6fc9;
+  --accent-wash: #e6effb;
+  --code-bg: #eef1f6;
+  /* results-contract classes (semantic, always shown with their letter + label) */
+  --c-a: #1f7a4d; --c-a-bg: #e3f3ea;
+  --c-b: #8a5a00; --c-b-bg: #fbf0d9;
+  --c-c: #5b3fb0; --c-c-bg: #ece8fa;
+  --c-d: #3e5874; --c-d-bg: #e5ebf2;
+  /* chart series: validated categorical order (blue, orange, aqua, yellow, magenta) */
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4;
+  --grid: #e7eaf0;
+  --font-display: "IBM Plex Sans Condensed", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --step--1: 0.8125rem; --step-0: 1rem; --step-1: 1.1875rem; --step-2: 1.5rem; --step-3: 2.25rem;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #111419; --surface: #181c22; --ink: #eceff4; --ink-2: #b6bdc9; --muted: #8b93a3;
+    --rule: #2a3039; --rule-strong: #3a414c; --accent: #6aa6f0; --accent-wash: #1b2a3e; --code-bg: #1f242c;
+    --c-a: #6fd3a0; --c-a-bg: #15301f; --c-b: #f0c060; --c-b-bg: #33270d;
+    --c-c: #b7a6f5; --c-c-bg: #261f40; --c-d: #a9bed6; --c-d-bg: #1f2a36;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181;
+    --grid: #262b33;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #111419; --surface: #181c22; --ink: #eceff4; --ink-2: #b6bdc9; --muted: #8b93a3;
+  --rule: #2a3039; --rule-strong: #3a414c; --accent: #6aa6f0; --accent-wash: #1b2a3e; --code-bg: #1f242c;
+  --c-a: #6fd3a0; --c-a-bg: #15301f; --c-b: #f0c060; --c-b-bg: #33270d;
+  --c-c: #b7a6f5; --c-c-bg: #261f40; --c-d: #a9bed6; --c-d-bg: #1f2a36;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181;
+  --grid: #262b33;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 400 var(--step-0)/1.6 var(--font-body);
+  padding-inline: 16px; padding-block: 0 4rem;
+}
+.page { max-width: 54rem; margin: 0 auto; }
+.prose { max-width: 42rem; }
+h1, h2, h3 { font-family: var(--font-display); font-weight: 600; line-height: 1.15; text-wrap: balance; margin: 0; }
+h1 { font-size: var(--step-3); letter-spacing: -0.01em; }
+h2 { font-size: var(--step-2); }
+h3 { font-size: var(--step-1); font-weight: 500; }
+p { margin: 0; }
+a { color: var(--accent); text-underline-offset: 2px; }
+a:focus-visible, summary:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+code, pre, .mono { font-family: var(--font-mono); font-size: 0.875em; }
+code { background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 3px; }
+pre {
+  background: var(--code-bg); padding: 0.85rem 1rem; border-radius: 4px; margin: 0;
+  overflow-x: auto; line-height: 1.5; font-size: 0.8125rem;
+}
+pre code { background: none; padding: 0; font-size: inherit; }
+.eyebrow { font: 500 var(--step--1)/1.4 var(--font-mono); color: var(--muted); letter-spacing: 0.02em; }
+
+header.top { padding-block: 3rem 2rem; border-bottom: 1px solid var(--rule); display: grid; gap: 1rem; }
+header.top .lede { color: var(--ink-2); font-size: var(--step-1); line-height: 1.5; max-width: 40rem; }
+nav.toc { display: flex; flex-wrap: wrap; gap: 0.25rem 1.25rem; font-size: var(--step--1); }
+nav.toc a { color: var(--ink-2); text-decoration: none; border-bottom: 1px solid var(--rule-strong); }
+nav.toc a:hover { color: var(--accent); border-color: var(--accent); }
+
+section { padding-block: 2.75rem 0; display: grid; gap: 1.1rem; }
+section > h2 { display: flex; align-items: baseline; gap: 0.75rem; }
+section > h2 .num { font: 500 var(--step--1) var(--font-mono); color: var(--muted); }
+
+.findings { display: grid; gap: 0.6rem; margin: 0; padding: 0; list-style: none; }
+.findings li { display: grid; grid-template-columns: 5.5rem 1fr; gap: 1rem; align-items: baseline; padding-block: 0.6rem; border-top: 1px solid var(--rule); }
+.findings li:last-child { border-bottom: 1px solid var(--rule); }
+.findings .fig { font: 600 var(--step-2)/1 var(--font-display); font-variant-numeric: tabular-nums; }
+.findings .txt { min-width: 0; color: var(--ink-2); }
+.findings .txt strong { color: var(--ink); font-weight: 600; }
+
+.chip {
+  display: inline-flex; align-items: center; gap: 0.35em; white-space: nowrap;
+  font: 500 0.75rem/1 var(--font-mono); padding: 0.3em 0.55em; border-radius: 3px;
+}
+.chip b { font-weight: 600; }
+.chip.a { color: var(--c-a); background: var(--c-a-bg); }
+.chip.b { color: var(--c-b); background: var(--c-b-bg); }
+.chip.c { color: var(--c-c); background: var(--c-c-bg); }
+.chip.d { color: var(--c-d); background: var(--c-d-bg); }
+
+.contract { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 0.75rem; }
+.contract > div { background: var(--surface); border: 1px solid var(--rule); border-radius: 4px; padding: 0.9rem 1rem; display: grid; gap: 0.45rem; align-content: start; min-width: 0; }
+.contract p { font-size: 0.9rem; color: var(--ink-2); }
+
+.tablewrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 4px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 0.875rem; }
+th, td { text-align: left; padding: 0.55rem 0.75rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font: 500 0.75rem/1.3 var(--font-mono); color: var(--muted); letter-spacing: 0.02em; background: var(--bg); }
+tr:last-child td { border-bottom: 0; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+td .mono { white-space: nowrap; }
+
+/* pipeline map */
+.pipe { display: grid; grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr)); gap: 0; border: 1px solid var(--rule); border-radius: 4px; background: var(--surface); overflow: hidden; }
+.pipe .stage { padding: 0.8rem 0.85rem; border-right: 1px solid var(--rule); border-bottom: 1px solid var(--rule); display: grid; gap: 0.4rem; align-content: start; position: relative; min-width: 0; }
+.pipe .stage .name { font: 600 0.9rem/1.2 var(--font-display); }
+.pipe .stage .file { font: 400 0.7rem/1.3 var(--font-mono); color: var(--muted); overflow-wrap: anywhere; }
+.pipe .stage .ids { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+.pipe .stage .ids a { font: 500 0.72rem/1 var(--font-mono); padding: 0.3em 0.45em; border-radius: 3px; text-decoration: none; color: var(--accent); background: var(--accent-wash); }
+.pipe .stage .ids a:hover { text-decoration: underline; }
+.pipe .stage.hot::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--accent); }
+.pipe-note { font-size: var(--step--1); color: var(--muted); }
+
+/* charts */
+figure { margin: 0; display: grid; gap: 0.75rem; background: var(--surface); border: 1px solid var(--rule); border-radius: 4px; padding: 1.1rem 1.1rem 0.9rem; min-width: 0; }
+figcaption { display: grid; gap: 0.2rem; }
+figcaption .t { font: 600 1rem/1.3 var(--font-display); }
+figcaption .s { font-size: var(--step--1); color: var(--muted); }
+.legend { display: flex; flex-wrap: wrap; gap: 0.35rem 1rem; font-size: 0.8rem; color: var(--ink-2); }
+.legend span { display: inline-flex; align-items: center; gap: 0.4rem; }
+.legend i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.chart { position: relative; width: 100%; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart text { fill: var(--ink-2); font-family: var(--font-body); }
+.chart .axis text { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.chart .grid line { stroke: var(--grid); stroke-width: 1; }
+.chart .base { stroke: var(--rule-strong); stroke-width: 1; }
+.chart .ref line { stroke: var(--ink-2); stroke-width: 1.5; stroke-dasharray: 0; }
+.chart .ref text { fill: var(--ink-2); font-size: 11px; }
+.chart .hit { fill: transparent; cursor: default; }
+.chart .mark { transition: opacity 120ms; }
+.chart.dim .mark { opacity: 0.35; }
+.chart.dim .mark.on { opacity: 1; }
+.tip {
+  position: absolute; pointer-events: none; z-index: 2; min-width: 9rem; max-width: 16rem;
+  background: var(--surface); color: var(--ink); border: 1px solid var(--rule-strong); border-radius: 4px;
+  padding: 0.5rem 0.6rem; font-size: 0.78rem; line-height: 1.4; box-shadow: 0 4px 14px rgb(0 0 0 / 0.12);
+}
+.tip b { font-weight: 600; }
+.tip .row { display: flex; justify-content: space-between; gap: 1rem; font-variant-numeric: tabular-nums; }
+.tip .row span:first-child { color: var(--muted); }
+details.data summary { cursor: pointer; font-size: 0.8rem; color: var(--ink-2); width: fit-content; }
+details.data[open] summary { margin-bottom: 0.5rem; }
+.pending { color: var(--muted); font-style: italic; }
+
+/* proposals */
+.proposals { display: grid; gap: 0; border-top: 1px solid var(--rule-strong); }
+article.p { display: grid; grid-template-columns: 3.25rem minmax(0, 1fr); gap: 0 1rem; padding-block: 1.6rem; border-bottom: 1px solid var(--rule); scroll-margin-top: 1rem; }
+article.p .pid { font: 600 var(--step-1)/1.1 var(--font-mono); color: var(--accent); }
+article.p .body { display: grid; gap: 0.75rem; min-width: 0; }
+article.p .meta { display: flex; flex-wrap: wrap; gap: 0.4rem 0.9rem; align-items: center; font-size: var(--step--1); color: var(--muted); }
+article.p .meta .mono { color: var(--ink-2); }
+article.p p, article.p li { color: var(--ink-2); max-width: 42rem; }
+article.p p strong, article.p li strong { color: var(--ink); font-weight: 600; }
+article.p ul { margin: 0; padding-left: 1.15rem; display: grid; gap: 0.3rem; }
+.kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 0.3rem 1rem; font-size: 0.9rem; margin: 0; }
+.kv dt { color: var(--muted); font: 500 0.75rem/1.6 var(--font-mono); padding-top: 0.1rem; }
+.kv dd { margin: 0; color: var(--ink-2); min-width: 0; }
+.effect { font-variant-numeric: tabular-nums; }
+
+ol.rollout { margin: 0; padding-left: 1.4rem; display: grid; gap: 0.6rem; max-width: 42rem; }
+ol.rollout li { color: var(--ink-2); padding-left: 0.25rem; }
+ol.rollout li strong { color: var(--ink); }
+
+footer { margin-top: 3rem; padding-top: 1.25rem; border-top: 1px solid var(--rule); font-size: var(--step--1); color: var(--muted); display: grid; gap: 0.4rem; }
+
+@media (max-width: 34rem) {
+  .findings li { grid-template-columns: 1fr; gap: 0.2rem; }
+  article.p { grid-template-columns: 1fr; gap: 0.5rem; }
+  .kv { grid-template-columns: 1fr; }
+  .kv dd { margin-bottom: 0.4rem; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="page">
+
+<header class="top">
+  <div class="eyebrow">cbm-eval · branch perf/speedup-report · 6 Oct 2026</div>
+  <h1>CBM-Eval Speed-ups</h1>
+  <p class="lede">Where the pipeline spends its time, which changes would cut it, and what each one does to the
+    reproducibility invariants. Every number below was measured on this codebase, locally on CPU or on Modal GPUs.</p>
+  <nav class="toc" aria-label="Contents">
+    <a href="#glance">At a glance</a><a href="#contract">Results contract</a><a href="#time">Where the time goes</a>
+    <a href="#measured">Measured speed-ups</a><a href="#finetune">Fine-tuning</a><a href="#proposals">Proposals</a>
+    <a href="#skip">Not worth it</a><a href="#rollout">Rollout</a><a href="#method">Method</a>
+  </nav>
+</header>
+
+<section id="glance">
+  <h2><span class="num">1</span>At a glance</h2>
+  <ul class="findings" id="findings"></ul>
+</section>
+
+<section id="contract">
+  <h2><span class="num">2</span>Results contract</h2>
+  <div class="prose" style="display:grid;gap:.8rem">
+    <p>The <code>run_id</code> hashes the config, not the code, and <code>sweep</code> skips every
+      <code>(run_id, seed)</code> already in the results file. A change that alters any number a run produces must
+      therefore be opt-in, or the old rows silently become incomparable with new ones. Each proposal carries one of four
+      labels that say how it may land.</p>
+  </div>
+  <div class="contract">
+    <div><span class="chip a"><b>A</b> Identical</span><p>Same outputs bit for bit, verified by benchmark. Lands in place; add a regression test comparing outputs before and after.</p></div>
+    <div><span class="chip b"><b>B</b> Float-level</span><p>Same math, but a different reduction or batching order can move the last bits. Lands in place with an <code>allclose</code> test; say so in the commit message.</p></div>
+    <div><span class="chip c"><b>C</b> Opt-in</span><p>Changes numerics or an RNG stream. Needs a new kwarg whose default keeps the old behaviour, or a new registered variant. Changes the run id only when set.</p></div>
+    <div><span class="chip d"><b>D</b> Bookkeeping</span><p>Touches only caches, I/O or the sweep driver. No run output changes; cache-key tests in <code>tests/test_cache_keys.py</code> must stay green.</p></div>
+  </div>
+</section>
+
+<section id="time">
+  <h2><span class="num">3</span>Where the time goes</h2>
+  <div class="prose"><p>A frozen-backbone CUB run of the Koh et al. anchors (the configuration every
+    <code>cub_koh2020*</code> ablation repeats), on the cached Inception features, split by pipeline step with
+    wall-clock timers around each step. The concept phase runs to the 200-epoch cap in both anchors; the
+    independent head phase does too, while the sequential head stops early.</p></div>
+  <figure>
+    <figcaption><span class="t">Wall time of one frozen CUB run, by step</span>
+      <span class="s" id="timeSub">Seconds, seed 1, Modal L4 container with 8 vCPU. Training on CPU or on the L4, and a second run of the same config on the first run's context.</span></figcaption>
+    <div class="legend" id="timeLegend"></div>
+    <div class="chart" id="timeChart"></div>
+    <details class="data"><summary>Show the numbers</summary><div class="tablewrap" id="timeTable"></div></details>
+  </figure>
+  <div class="prose"><p>Mapped onto the pipeline, the proposals below concentrate on the training stage, the
+    evaluators and the per-run setup that a sweep repeats for every config.</p></div>
+  <div class="pipe" id="pipe"></div>
+  <p class="pipe-note">Highlighted stages have at least one proposal. IDs link to it.</p>
+</section>
+
+<section id="measured">
+  <h2><span class="num">4</span>Measured speed-ups</h2>
+  <div class="prose"><p>Each bar compares the current code path with the proposed one on CUB-sized inputs
+    (4,796 train / 1,198 val / 5,794 test images, D = 2048, K = 112 concepts, C = 200 classes), calling the library's own
+    functions. The two end-to-end bars (reused context, cached val) come from the Modal runs above. Every comparison
+    also checked that the outputs match. Hover a bar for the before and after times.</p></div>
+  <figure>
+    <figcaption><span class="t">Speed-up factor, current ÷ proposed</span>
+      <span class="s">Higher is faster. 1× means no change.</span></figcaption>
+    <div class="chart" id="speedChart"></div>
+    <details class="data"><summary>Show the numbers</summary><div class="tablewrap" id="speedTable"></div></details>
+  </figure>
+</section>
+
+<section id="finetune">
+  <h2><span class="num">5</span>Fine-tuning on the GPU</h2>
+  <div class="prose" style="display:grid;gap:.8rem">
+    <p>The fine-tuned anchors (<code>finetune:</code> on Inception-v3, up to 300 epochs at roughly 15 s each) are the
+      most expensive runs in the study. Two measurements on an A100 show how much faster a step could be, and how much
+      of that a real epoch would see.</p>
+  </div>
+  <figure>
+    <figcaption><span class="t">Training step throughput by precision mode</span>
+      <span class="s" id="ftSub">Images per second for forward, backward and SGD step, batch 64 at 299 px, images already on the GPU.</span></figcaption>
+    <div class="chart" id="ftChart"></div>
+    <details class="data"><summary>Show the numbers</summary><div class="tablewrap" id="ftTable"></div></details>
+  </figure>
+  <div class="prose"><p>A real epoch also loads and augments the images. The second chart runs one warm epoch of the
+    <code>cub_koh2020</code> loop on the anchor's own <code>_ImageFeed</code> loaders (8 workers, 16 vCPU) and splits
+    it into time spent waiting for the next batch and time spent computing.</p></div>
+  <figure>
+    <figcaption><span class="t">One fine-tuning epoch, split into data wait and compute</span>
+      <span class="s" id="epSub">Seconds per epoch, 4,796 train and 1,198 val images, A100.</span></figcaption>
+    <div class="legend" id="epLegend"></div>
+    <div class="chart" id="epChart"></div>
+    <details class="data"><summary>Show the numbers</summary><div class="tablewrap" id="epTable"></div></details>
+  </figure>
+  <div class="prose" id="ftNote" style="display:grid;gap:.8rem"></div>
+</section>
+
+<section id="proposals">
+  <h2><span class="num">6</span>Proposals</h2>
+  <div class="prose"><p>Ordered by measured payoff per unit of effort. Each entry says where the change goes, what it
+    touches in the architecture, and how it is allowed to land.</p></div>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>ID</th><th>Change</th><th>Effect</th><th>Contract</th><th>Effort</th></tr></thead>
+      <tbody id="summaryRows"></tbody>
+    </table>
+  </div>
+  <div class="proposals" id="plist"></div>
+</section>
+
+<section id="skip">
+  <h2><span class="num">7</span>Checked, not worth it</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Candidate</th><th class="num">Measured</th><th>Why it stays</th></tr></thead>
+      <tbody>
+        <tr><td>Shuffle once per epoch instead of fancy-indexing each minibatch (<code>Batch.__getitem__</code>)</td><td class="num">3 ms / epoch</td><td>About 5% of a 55 ms concept-phase epoch. Same memory traffic either way.</td></tr>
+        <tr><td>Lazy-greedy submodular selection (<code>SelectFilter._greedy</code>)</td><td class="num">0.46 s</td><td>Once per run, even at 6,000 candidates and k = 50.</td></tr>
+        <tr><td>Avoid <code>copy.deepcopy(state_dict)</code> on each improved epoch</td><td class="num">&lt; 1 ms</td><td>The concept layer and head are a few MB. The fine-tuning path already copies to CPU tensors.</td></tr>
+        <tr><td>Train frozen-feature phases on the GPU (<code>device: auto</code>)</td><td class="num">33.5 s → 33.5 s</td><td>On the L4 the concept and head phases get faster (17.2 s → 12.4 s), but the leakage probes slow down (2.6 s → 5.1 s) and nothing else moves. Small minibatches are bound by launch overhead, and after P3 the CPU path gets cheaper still. Keep frozen runs on CPU.</td></tr>
+        <tr><td>Load a feature cache with <code>torch.load(mmap=True)</code></td><td class="num" id="mmapCell">–</td><td>Loading is already fast from a warm page cache. Worth it only for memory (see P4), not speed.</td></tr>
+        <tr><td>Vectorize the per-detection loop in <code>GroundingDINOScorer</code></td><td class="num">not timed</td><td>Python work per box is negligible next to the detector forward pass.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="rollout">
+  <h2><span class="num">8</span>Rollout</h2>
+  <ol class="rollout" id="rollout"></ol>
+</section>
+
+<section id="method">
+  <h2><span class="num">9</span>Method</h2>
+  <div class="prose" style="display:grid;gap:.8rem">
+    <p><strong>CPU.</strong> Apple M-series laptop, 10 cores, 8 torch threads, torch 2.14.1. Micro-benchmarks call
+      <code>optimize</code>, <code>ScoreLayer</code>, <code>SparseHead</code>, <code>SelectFilter</code>,
+      <code>CUB</code>, <code>ResultsStore</code> and <code>InceptionBackbone</code> directly, on random tensors of
+      CUB shape (Inception with random weights where only timing matters). Each comparison also checks that the
+      outputs match.</p>
+    <p><strong>GPU.</strong> <code>scripts/speedup_bench_modal.py</code> on this branch, torch 2.8.0, the same image as
+      <code>koh2020_modal.py</code>. <code>main</code> runs the micro-benchmarks on an A100 (the container reported an
+      A100 80GB PCIe). <code>profile</code> runs both frozen Koh et al. anchors on an L4 container with 8 vCPU, reading
+      the cached Inception features on the <code>cbm-koh2020</code> volume, and times each step with wall-clock wrappers
+      (cProfile dropped outer frames on Python 3.12 and inflated the small training calls). <code>epoch</code> runs two
+      epochs of the <code>cub_koh2020</code> fine-tuning loop on the anchor's <code>_ImageFeed</code> loaders, 16 vCPU,
+      and reports the second.</p>
+    <pre><code>uv run modal run scripts/speedup_bench_modal.py            # A100 micro-benchmarks
+uv run modal run scripts/speedup_bench_modal.py::profile   # frozen CUB runs, time per step (L4)
+uv run modal run scripts/speedup_bench_modal.py::epoch     # fine-tuning epoch: data wait vs compute (A100)</code></pre>
+    <p>Speed-ups on other hardware will differ. The ratios for removed work (recomputation, double forwards) are the
+      most portable. The fine-tuning ratios depend on the GPU generation.</p>
+  </div>
+</section>
+
+<footer>
+  <div>Generated for the cbm-eval maintainers. Sources: <code>src/cbm_eval/</code> at <code>85fde0e</code>, benchmark script on <code>perf/speedup-report</code>.</div>
+</footer>
+</div>
+
+<script>
+/* ---------------- measured data (see Method) ---------------- */
+const DATA = {"speed":{"head_cpu":{"before":0.03435,"after":0.00781,"unit":"s","per":"epoch"},"head_gpu":{"before":0.02326,"after":0.02122,"unit":"s","per":"epoch"},"indep_head":{"before":0.02799,"after":0.00742,"unit":"s","per":"epoch"},"concept_phase":{"before":0.04234,"after":0.0155,"unit":"s","per":"epoch"},"leak":{"before":0.13147,"after":0.01722,"unit":"s","per":"17 passes"},"dedupe":{"before":0.57104,"after":0.06919,"unit":"s","per":"6,000 candidates"},"extract_cpu":{"before":3.7298,"after":1.8187,"unit":"s","per":"16 images"},"extract_gpu":{"before":0.0575,"after":0.0288,"unit":"s","per":"64 images"},"cub_parse":{"before":2.43,"after":0.42,"unit":"s","per":"attribute file"},"reuse_ind":{"before":33.54,"after":19.64,"unit":"s","per":"run"},"reuse_seq":{"before":31.74,"after":16.04,"unit":"s","per":"run"},"ft_compute":{"before":9.551281994999997,"after":5.46329232299999,"unit":"s","per":"epoch, train compute"},"ft_epoch_valcache":{"before":14.73,"after":12.23,"unit":"s","per":"epoch"},"ft_epoch_amp":{"before":14.73,"after":14.04,"unit":"s","per":"epoch"}},"cub_init_local":4.37,"results_has":0.1697,"mmap":{"before":0.0265,"after":0.0025},"profile":{"rows":[{"label":"Independent \u00b7 CPU","groups":{"data":13.6,"concept":10.48,"head":6.73,"eval":2.72,"other":0.01},"total":33.54},{"label":"Independent \u00b7 CPU \u00b7 reused context","groups":{"data":0.0,"concept":10.19,"head":6.61,"eval":2.81,"other":0.03},"total":19.64},{"label":"Independent \u00b7 L4 GPU","groups":{"data":15.45,"concept":6.91,"head":5.49,"eval":5.22,"other":0.42},"total":33.49},{"label":"Sequential \u00b7 CPU","groups":{"data":15.54,"concept":11.38,"head":1.54,"eval":3.28,"other":0.01},"total":31.74},{"label":"Sequential \u00b7 CPU \u00b7 reused context","groups":{"data":0.0,"concept":11.4,"head":1.55,"eval":3.06,"other":0.03},"total":16.04},{"label":"Sequential \u00b7 L4 GPU","groups":{"data":16.21,"concept":6.77,"head":1.05,"eval":4.02,"other":0.4},"total":28.47}]},"ft":{"gpu":"NVIDIA A100 80GB PCIe","modes":[{"name":"fp32","ips":580.0,"step":0.1103},{"name":"channels_last","ips":748.5,"step":0.0855},{"name":"bf16","ips":727.8,"step":0.0879},{"name":"bf16+channels_last","ips":1117.3,"step":0.0573},{"name":"bf16+channels_last+compile","ips":1257.1,"step":0.0509}],"epoch":[{"label":"Current (fp32)","train_wait":1.97,"train_compute":9.55,"val_wait":2.53,"val_compute":0.68},{"label":"bf16 + channels_last","train_wait":5.05,"train_compute":5.46,"val_wait":2.98,"val_compute":0.55},{"label":"Cached val images","train_wait":2.19,"train_compute":9.5,"val_wait":0.0,"val_compute":0.54}],"val_cache_build":4.04,"n_train":4796,"n_val":1198}};
+
+/* ---------------- helpers ---------------- */
+const S = () => DATA.speed;
+const $ = (s) => document.querySelector(s);
+const fmt = (v, d = 2) => v == null ? "–" : Number(v).toFixed(d);
+const ratio = (s) => s.before / s.after;
+const fx = (s) => s && s.before && s.after ? `${ratio(s).toFixed(1)}× faster` : "–";
+const pct = (s) => `−${Math.round((1 - s.after / s.before) * 100)}%`;
+const sec = (v) => v == null ? "–" : `${v.toFixed(1)} s`;
+const ms = (v) => v == null ? "–" : `${Math.round(v * 1000)} ms`;
+const CH = { a: "Identical", b: "Float-level", c: "Opt-in", d: "Bookkeeping" };
+const chip = (c) => `<span class="chip ${c}"><b>${c.toUpperCase()}</b> ${CH[c]}</span>`;
+const NS = "http://www.w3.org/2000/svg";
+function el(tag, attrs = {}, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function niceStep(v) {
+  const p = Math.pow(10, Math.floor(Math.log10(v))), n = v / p;
+  return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * p;
+}
+function axis(maxValue, n = 5) {
+  const step = niceStep(maxValue / n), max = Math.ceil(maxValue / step) * step, out = [];
+  for (let v = 0; v <= max + 1e-9; v += step) out.push(+v.toFixed(6));
+  return { max, ticks: out };
+}
+function table(head, rows, numCols = []) {
+  return `<table><thead><tr>${head.map((h, i) => `<th class="${numCols.includes(i) ? "num" : ""}">${h}</th>`).join("")}</tr></thead>
+    <tbody>${rows.map(r => `<tr>${r.map((c, i) => `<td class="${numCols.includes(i) ? "num" : ""}">${c}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+}
+function tipper(host) {
+  const tip = document.createElement("div"); tip.className = "tip"; tip.hidden = true; host.appendChild(tip);
+  return {
+    show(html, evt) {
+      tip.innerHTML = html; tip.hidden = false;
+      const r = host.getBoundingClientRect(), tw = tip.offsetWidth, th = tip.offsetHeight;
+      let x = evt.clientX - r.left + 12, y = evt.clientY - r.top - th - 8;
+      if (x + tw > r.width) x = evt.clientX - r.left - tw - 12;
+      if (y < 0) y = evt.clientY - r.top + 14;
+      tip.style.left = Math.max(0, x) + "px"; tip.style.top = y + "px";
+    },
+    hide() { tip.hidden = true; },
+  };
+}
+const rows = (pairs) => pairs.map(([k, v]) => `<div class="row"><span>${k}</span><span>${v}</span></div>`).join("");
+
+/* Horizontal bars, single-series or stacked, drawn to one linear scale.
+   items: [{label, segs: [{value, color, tip}]}]; a 2px surface gap separates stacked segments. */
+function hbar(host, items, opts) {
+  host.innerHTML = "";
+  const narrow = host.clientWidth && host.clientWidth < 520;
+  const W = narrow ? 480 : 760, labelW = narrow ? (opts.labelWNarrow || 150) : (opts.labelW || 210);
+  const padR = 52, rowH = 34, barH = 20, top = 6, axisH = 24, H = top + items.length * rowH + axisH;
+  const total = (it) => it.segs.reduce((a, s) => a + Math.max(0, s.value), 0);
+  const { max, ticks } = axis(Math.max(...items.map(total)) * 1.02);
+  const x = (v) => labelW + (v / max) * (W - labelW - padR);
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": opts.aria });
+  const g = el("g", { class: "grid" }, svg), ax = el("g", { class: "axis" }, svg);
+  for (const t of ticks) {
+    el("line", { x1: x(t), x2: x(t), y1: top, y2: top + items.length * rowH }, g);
+    const tx = el("text", { x: x(t), y: H - 6, "text-anchor": "middle" }, ax); tx.textContent = opts.tick(t);
+  }
+  const tp = tipper(host);
+  items.forEach((it, i) => {
+    const y = top + i * rowH + (rowH - barH) / 2;
+    const lb = el("text", { x: labelW - 10, y: y + barH / 2 + 4, "text-anchor": "end", "font-size": narrow ? 11 : 12.5 }, svg);
+    lb.textContent = narrow && it.short ? it.short : it.label;
+    const segs = it.segs.filter(s => s.value > 0);
+    let acc = 0;
+    segs.forEach((s, j) => {
+      const last = j === segs.length - 1;
+      const x0 = x(acc) + (j ? 1 : 0), x1 = x(acc + s.value) - (last ? 0 : 1), w = Math.max(1, x1 - x0);
+      const r = last ? Math.min(4, w / 2) : 0;
+      const d = r ? `M${x0},${y}h${w - r}a${r},${r} 0 0 1 ${r},${r}v${barH - 2 * r}a${r},${r} 0 0 1 -${r},${r}h-${w - r}z`
+                  : `M${x0},${y}h${w}v${barH}h-${w}z`;
+      const m = el("path", { d, fill: s.color, class: "mark" }, svg);
+      const hit = el("rect", { x: x0, y: top + i * rowH, width: Math.max(w, 6), height: rowH, class: "hit" }, svg);
+      hit.addEventListener("mousemove", (e) => { host.classList.add("dim"); m.classList.add("on"); tp.show(s.tip, e); });
+      hit.addEventListener("mouseleave", () => { host.classList.remove("dim"); m.classList.remove("on"); tp.hide(); });
+      acc += s.value;
+    });
+    if (opts.endLabel) {
+      const t = el("text", { x: x(acc) + 6, y: y + barH / 2 + 4, "font-size": 12, "font-weight": 600 }, svg);
+      t.textContent = opts.endLabel(it, acc); t.setAttribute("style", "fill: var(--ink)");
+    }
+  });
+  el("line", { x1: labelW, x2: labelW, y1: top, y2: top + items.length * rowH, class: "base" }, svg);
+  host.appendChild(svg);
+}
+const legend = (host, groups) => { host.innerHTML = groups.map(([, n, c]) => `<span><i style="background:var(${c})"></i>${n}</span>`).join(""); };
+
+/* ---------------- proposals, ranked by measured payoff per effort ---------------- */
+const P = [
+  {
+    id: "P1", title: "Reuse the Context across runs of a sweep",
+    where: "pipeline.py — sweep, run; context.py", contract: "a", effort: "M",
+    effect: () => `Frozen CUB run ${sec(S().reuse_ind.before)} → ${sec(S().reuse_ind.after)} (independent), ${sec(S().reuse_seq.before)} → ${sec(S().reuse_seq.after)} (sequential)`,
+    what: `<p><code>sweep</code> calls <code>run(cfg)</code> without a context, so every config rebuilds the dataset,
+      loads the backbone (CLIP loads its weights in <code>__init__</code>), reloads each feature split from disk and
+      re-encodes concept and class texts. On Modal, building the CUB dataset alone takes 13–16 s of a ~30 s frozen run.
+      An OFAT sweep varies stages and rarely the dataset or backbone. <code>run</code> already accepts a
+      <code>ctx</code>, and <code>train()</code> already resets the fine-tuned encoder for reuse.</p>
+      <p>Group configs by everything <code>PipelineBuilder.context()</code> reads (dataset, backbone, teacher,
+      eval_datasets, instances, need_patches, device, cache path) and reuse one context per group.
+      <code>Context.seed</code> and <code>Context.cfg</code> come from the config at construction, so the builder must
+      refresh them per run; rule 5 lets only <code>PipelineBuilder</code> set run state.</p>`,
+    changes: [
+      "<code>PipelineBuilder.context_key()</code>, and <code>Context.for_run(cfg)</code>, which sets <code>cfg</code> and <code>seed</code> and clears <code>concepts</code>.",
+      "<code>sweep</code> keeps the context of the current group alive and drops it when the group changes, so memory stays at one context.",
+      "<strong>Frozen runs only.</strong> <code>InceptionBackbone</code> builds its network lazily, which draws from the global RNG the first time <code>encoder()</code> runs. A reused context would skip that draw and shift dropout in fine-tuning runs, so bypass reuse when <code>training.trains_backbone</code>.",
+    ],
+    code: `# pipeline.py, sweep
+key = builder.context_key()
+if key != current_key or builder.training.trains_backbone:
+    ctx, current_key = builder.context(), key
+res = run(cfg, store, save=save, ctx=ctx.for_run(cfg))`,
+    verify: "Measured on Modal: the second run on the first run's context reported the same accuracy and concept error to the last digit. As a test, run the synthetic ablation with and without reuse and require equal (not close) metrics.",
+  },
+  {
+    id: "P2", title: "Parse the CUB annotation files with pandas",
+    where: "data/cub.py — CUB._load", contract: "a", effort: "XS",
+    effect: () => `${fx(S().cub_parse)} on the 3.7M-line attribute file; it was ${Math.round(S().cub_parse.before / DATA.cub_init_local * 100)}% of <code>CUB()</code> locally`,
+    what: `<p><code>image_attribute_labels.txt</code> has 3,677,856 lines. <code>_load</code> splits each in Python and
+      assigns into two arrays in a Python loop. <code>pd.read_csv(sep=r"\\s+", usecols=[0, 1, 2, 3])</code> reads it in
+      one call (it tolerates the 2,275 lines with an extra column), and fancy indexing fills both arrays. Every process
+      that builds CUB pays this cost: each fine-tuning container, <code>cbm-eval evaluate</code>, and every sweep run until
+      P1 lands.</p>`,
+    changes: [
+      "Only <code>CUB._load</code> changes; pandas is already a core dependency.",
+      "The image-size pass (about 12k header reads) stays. It was 0.4 s locally from a warm disk.",
+    ],
+    code: `# data/cub.py, CUB._load
+a = pd.read_csv(r / "attributes" / "image_attribute_labels.txt", sep=r"\\s+", header=None,
+                usecols=[0, 1, 2, 3], dtype=np.int64).to_numpy()
+present[a[:, 0], a[:, 1] - 1] = a[:, 2]
+not_visible[a[:, 0], a[:, 1] - 1] = a[:, 3] == 1`,
+    verify: "Benchmarked: both arrays identical (np.array_equal) over all 3,677,856 rows. Add a test on a small fixture that includes a 6-column line.",
+  },
+  {
+    id: "P3", title: "Training phases: normalize once, precompute what is frozen, drop what is unused",
+    where: "stages/training.py — _Base, Sequential, Batch; stages/base.py; stages/predictor.py", contract: "a", effort: "M",
+    effect: () => `Concept phase ${fx(S().concept_phase)}, independent head ${fx(S().indep_head)}, sequential head ${fx(S().head_cpu)} per epoch on CPU`,
+    what: `<p>On frozen features, every minibatch step repeats work whose result cannot change:</p>
+      <ul>
+        <li><strong>Normalization.</strong> <code>concept_logits(x)</code> computes <code>(x - x_mean) / x_std</code> on a
+          (256, 2048) batch, but both are buffers fixed by <code>fit_input_stats</code> before training starts.</li>
+        <li><strong>Frozen concepts.</strong> In the <code>sequential</code> head phase only <code>head.phases()</code>
+          and <code>layer.rep_params()</code> are optimized, yet <code>rep()</code> recomputes the concept layer on
+          every step.</li>
+        <li><strong>Unused features.</strong> <code>task_loss</code> computes <code>layer.normalize(b.x)</code> for the
+          head, although <code>LinearHead</code> and <code>SparseHead</code> ignore <code>x_norm</code>, and the score,
+          logit and BoC layers ignore <code>x</code> in <code>represent</code>. The independent CUB head, with 112
+          inputs, ends up costing as much as one with 2,048.</li>
+      </ul>
+      <p>Normalize the train and val features once in <code>_prepare</code>, compute <code>c_hat</code> once after
+      <code>_fit_concepts</code>, and leave raw features out of head-phase batches when neither the layer nor the head reads
+      them. CEM embeddings, residual heads and MIL heads still receive features. On a GPU the phases are bound by launch
+      overhead, so this gives only ${fx(S().head_gpu)} there; frozen runs are about as fast on CPU, where it pays.</p>`,
+    changes: [
+      "<code>ConceptLayer.concept_logits</code> becomes <code>logits_from_normalized(self.normalize(x))</code>, and training calls <code>logits_from_normalized</code> on pre-normalized batches. No variant overrides <code>concept_logits</code> today.",
+      "Two class-level flags with safe defaults, read by the training stage (rule 2): <code>ConceptLayer.represent_uses_x = True</code> (False on score, logit and BoC layers) and <code>PredictorHead.uses_features = True</code> (False on <code>LinearHead</code>, inherited by <code>SparseHead</code>).",
+      "<code>Batch</code> gains optional <code>xn</code> and <code>c</code> fields. For (N, M, D) bags, normalize per batch as now, since a second copy of a patch bag can run to gigabytes.",
+      "Joint training fits the layer, so it keeps per-step concept logits but can still use the pre-normalized features.",
+    ],
+    code: `# stages/training.py
+def _fit_head(self, layer, head, tr, va, rep_fn, seed):
+    if not (layer.represent_uses_x or head.uses_features):
+        tr, va = tr.without_x(), va.without_x()        # (B, K) only
+    def task_loss(b):
+        return self._task_loss(head(rep_fn(b), b.xn if head.uses_features else None, b.bag), b)
+    ...
+# Sequential._fit:  tr.c = layer.activate(layer.logits_from_normalized(tr.xn))   # once, no_grad`,
+    verify: "Benchmarked all three changes: layer and head weights after 20 epochs identical (max |Δ| = 0.0) on CPU. Add a test that trains every generation × predictor × training combination of the synthetic anchor both ways and compares state dicts. A full-batch L-BFGS solver would cut the 200-epoch Adam loops further, but it changes results, so it belongs in a new registered training variant.",
+  },
+  {
+    id: "P4", title: "Keep preprocessed val images in memory while fine-tuning",
+    where: "stages/training.py — _ImageFeed", contract: "a", effort: "S",
+    effect: () => `Fine-tuning epoch ${sec(S().ft_epoch_valcache.before)} → ${sec(S().ft_epoch_valcache.after)} on A100 (${pct(S().ft_epoch_valcache)})`,
+    what: `<p>Every epoch, <code>optimize_images</code> evaluates the val split through a fresh <code>DataLoader</code>
+      that decodes and resizes the same 1,198 images again. Workers start, each builds a batch of 128 images, and the GPU
+      waits ${sec(DATA.ft.epoch[0].val_wait)} for ${sec(DATA.ft.epoch[0].val_compute)} of compute. The val transform is
+      deterministic, so preprocessing once and keeping the tensors (1.3 GB in fp32, on the GPU or pinned in CPU memory)
+      feeds the encoder exactly the same inputs. Building the cache took ${sec(DATA.ft.val_cache_build)} once.</p>`,
+    changes: [
+      "<code>_ImageFeed</code> fills the cache on first use of the <code>val</code> loader; <code>batches(\"val\")</code> iterates it.",
+      "<code>Finetune.cache_val: bool = True</code> is optional. It schedules work only and does not change results, so it can default on and stay out of anything hashed.",
+    ],
+    code: `# stages/training.py, _ImageFeed
+def batches(self, split, loader=None):
+    if split == "val" and loader is None:
+        self._val = self._val or [(b["image"].to(self.device), b["index"]) for b in self.loaders["val"]]
+        for images, idx in self._val: yield self._batch(images, idx, split)
+        return
+    ...`,
+    verify: "Measured: same epoch with the cache spent 0.00 s waiting on val. Equality: compare the val loss per epoch over 2 epochs with and without the cache.",
+  },
+  {
+    id: "P5", title: "Reuse concept predictions across interventions and faithfulness steps",
+    where: "evaluation/leakage.py, evaluation/faithfulness.py, model.py", contract: "a", effort: "S",
+    effect: () => `${fx(S().leak)} for the 17 intervention passes`,
+    what: `<p><code>LeakageEvaluator</code> calls <code>cbm.predict(x, intervene=...)</code> once per fraction and
+      repeat, 17 full passes with the default settings, and each one recomputes the concept layer although an
+      intervention only replaces <code>c_hat</code> after activation. Give <code>TrainedCBM</code> a way to run the head
+      from given concept predictions, compute <code>c_hat</code> and <code>layer.normalize(x)</code> once, and replay the
+      masks. The remaining leakage time (about 2.5 s per CUB run) is the three L-BFGS probes.</p>
+      <p>The faithfulness evaluator has the same structure: 44 passes over up to 3,000 bags. With <code>mode: drop</code>
+      only the bag mask changes, so <code>rep</code> and <code>x_norm</code> can be reused outright. With
+      <code>mode: zero</code> a zeroed instance has a constant concept output, because <code>ConceptLayer</code> acts on
+      each instance independently, so <code>torch.where(keep, rep, rep_zero)</code> replaces the recomputation.</p>`,
+    changes: [
+      "<code>TrainedCBM.predict_from(c_hat, x, intervene=None, bag=None)</code>: the existing chunked loop without <code>concept_logits</code>. <code>predict</code> keeps its signature.",
+      "The evaluators call it; their metric keys and values do not change.",
+    ],
+    code: `# evaluation/leakage.py
+c_hat = cbm.predict(x, bag=bag)[1]                      # once
+for f in self.fractions:
+    ...
+    logits = cbm.predict_from(c_hat, x, intervene=(mask, gt), bag=bag)[0]`,
+    verify: "Benchmarked: all 17 logit tensors identical (torch.equal). The faithfulness change was not timed.",
+  },
+  {
+    id: "P6", title: "One backbone forward for global and patch features",
+    where: "data/features.py — load_features; backbones/*.py", contract: "a", effort: "S",
+    effect: () => `${fx(S().extract_cpu)} feature extraction on CPU, ${fx(S().extract_gpu)} on A100 (Inception, with patches)`,
+    what: `<p>When an evaluator or instance source needs patches, <code>load_features</code> calls
+      <code>encode_patches</code> and then <code>encode_images</code> on the same batch, which runs the whole network
+      twice. For Inception, <code>encode_images</code> is the mean of <code>encode_patches</code>; DINOv2 and CLIP return
+      both from one forward.</p>`,
+    changes: [
+      "<code>Backbone.encode_both(images) -> (global, patches)</code>, defaulting to the two existing calls, so new backbones need nothing.",
+      "Inception, DINOv2 and CLIP override it with one forward. <code>load_features</code> calls it when <code>patches=True</code>. Cache content and keys stay the same.",
+    ],
+    code: `# backbones/inception.py
+def encode_both(self, images):
+    p = self.encode_patches(images)
+    return p.mean(1), p`,
+    verify: "Inception and DINOv2 return the same tensors as before. For CLIP, check that the pooled output with output_tokens=True equals encode_image.",
+  },
+  {
+    id: "P7", title: "Mixed precision, channels-last and a faster input pipeline for fine-tuning",
+    where: "stages/training.py — Finetune, optimize_images, _ImageFeed", contract: "c", effort: "M",
+    effect: () => `Train compute ${fx(S().ft_compute)}, but the epoch only ${sec(S().ft_epoch_amp.before)} → ${sec(S().ft_epoch_amp.after)} until data loading keeps up`,
+    what: `<p>bf16 autocast plus channels-last memory nearly doubles the training step (see the charts), but in a real
+      epoch the dataloader then becomes the limit: 8 workers decoding and augmenting CUB JPEGs deliver about
+      ${Math.round(DATA.ft.n_train / (DATA.ft.epoch[1].train_wait + DATA.ft.epoch[1].train_compute))} images/s, so the
+      GPU waits ${sec(DATA.ft.epoch[1].train_wait)} per epoch instead of ${sec(DATA.ft.epoch[0].train_wait)}. The input
+      side must speed up alongside: decode on the GPU (<code>torchvision.io.decode_jpeg(device="cuda")</code>) with
+      augmentations in <code>torchvision.transforms.v2</code> on GPU tensors, or a one-time cache of images resized to
+      the crop scale.</p>
+      <p><code>Finetune</code> is a frozen dataclass built from the <code>finetune:</code> dict, so new fields are config
+      keys that change the run id only when set. All of these change numerics or the augmentation RNG stream and must be
+      opt-in.</p>`,
+    changes: [
+      "<code>Finetune.precision: str = \"fp32\"</code>; <code>bf16</code> wraps the encoder forward in <code>torch.autocast</code> (no GradScaler needed for bf16).",
+      "<code>Finetune.channels_last: bool = False</code>, <code>Finetune.compile: bool = False</code>, and <code>Finetune.gpu_augment: bool = False</code> for the GPU input pipeline.",
+      "<code>torch.backends.cudnn.benchmark</code> follows these flags, since it picks nondeterministic kernels.",
+      "The Koh anchors stay unchanged. A new ablation factor such as <code>stages.training.finetune.precision: [bf16]</code> measures the effect on accuracy and concept error.",
+    ],
+    code: `# stages/training.py, _ImageFeed.batches
+with torch.autocast(self.device.type, dtype=torch.bfloat16, enabled=self.spec.precision == "bf16"):
+    x = self.encoder(item["image"].to(self.device, non_blocking=True, memory_format=self.fmt))
+yield Batch(x.float(), ...)`,
+    verify: "Not result-preserving by design. Compare test accuracy and concept error over 3 seeds against the fp32 anchor before any anchor adopts it.",
+  },
+  {
+    id: "P8", title: "Serve feature requests from a superset cache, memory-mapped, written atomically",
+    where: "data/features.py — load_features; instances/base.py", contract: "d", effort: "S",
+    effect: () => `No re-extraction when localization is added; patch caches (about 1.5 GB for CUB test) no longer read whole`,
+    what: `<p>The feature key contains <code>patches</code>, so a split is extracted twice when one config evaluates
+      localization and another does not. Look up the <code>patches=True</code> file first when <code>patches=False</code>
+      is requested, and drop the patch tensor. Load with <code>torch.load(..., mmap=True)</code> so (N, P, D) patch
+      tensors stay on disk until an evaluator touches a batch. Write every cache to a temp file and
+      <code>os.replace</code> it, so an interrupted run never leaves a truncated <code>.pt</code>.</p>`,
+    changes: [
+      "A few lines in <code>load_features</code> and <code>load_instances</code>. Keys do not change, so existing caches stay valid.",
+      "<code>load_instances</code> converts the whole (N, M, D) tensor with <code>.float()</code>. Convert per batch instead to get the memory benefit for patch bags.",
+    ],
+    code: `# data/features.py
+for want in (True, False) if not patches else (True,):
+    p = _path(dataset, backbone, split, cache_dir, want)
+    if p.exists():
+        data = torch.load(p, weights_only=False, mmap=True)
+        if not patches: data["patch_features"] = None
+        return FeatureSplit(**data)`,
+    verify: "Extend tests/test_cache_keys.py: a patches=False request after a patches=True run must not write a new file.",
+  },
+  {
+    id: "P9", title: "Read the results file once per sweep",
+    where: "results.py — ResultsStore.has; pipeline.py — sweep", contract: "d", effort: "XS",
+    effect: () => `${ms(DATA.results_has)} per config at 3,000 rows (35 MB), paid again for every config`,
+    what: `<p><code>ResultsStore.has</code> parses the whole JSONL file on every call, and <code>sweep</code> calls it for
+      every config, so the cost grows quadratically over a study. Collect the finished <code>(run_id, seed)</code>
+      pairs once at the start of the sweep and add to the set as runs finish.</p>`,
+    changes: ["<code>ResultsStore.done() -> set[tuple[str, int]]</code>, used by <code>sweep</code>. <code>has</code> stays for other callers."],
+    code: `done = store.done()
+for cfg in configs:
+    if skip_existing and (cfg.run_id, cfg.seed) in done: ...`,
+    verify: "Behaviour is identical; the existing sweep-skip test covers it.",
+  },
+  {
+    id: "P10", title: "Faster filtering on large candidate sets",
+    where: "stages/filtering.py — CLIPFilter; context.py — encode_text", contract: "b", effort: "S",
+    effect: () => `${fx(S().dedupe)} dedupe at 6,000 candidates`,
+    what: `<p>LLM discovery on CUB proposes up to 200 classes × 3 prompts × 10 items, about 6,000 candidates. The
+      CLIP filter's dedupe loop computes <code>emb[kept] @ emb[i]</code> for each candidate. Computing the similarity
+      matrix once and keeping a running maximum over kept rows selects the same concepts. <code>Context.encode_text</code>
+      sends all missing texts to the text tower as one batch. Chunk it to avoid a GPU OOM, and cache the embeddings on disk
+      under <code>cache_dir/text/</code>, keyed by the backbone's <code>cache_key()</code> and the text.</p>`,
+    changes: [
+      "<code>CLIPFilter.filter</code>: a running-max loop over a precomputed similarity matrix.",
+      "<code>Context.encode_text</code>: chunked, with a disk cache. That is a new cache kind and needs a <code>CASES</code> entry in <code>tests/test_cache_keys.py</code>.",
+    ],
+    code: `sim, best, kept = emb @ emb.T, torch.full((len(emb),), -inf), []
+for i in keep:
+    if best[i] < self.dedupe_sim:
+        kept.append(i); best = torch.maximum(best, sim[i])`,
+    verify: "Same 1,022 of 6,000 selected in the benchmark. A matrix entry and a per-row dot product can differ in the last ulp, so a concept sitting exactly at the threshold could flip.",
+  },
+  {
+    id: "P11", title: "Parallel decoding and batched SAM in segment sources",
+    where: "instances/segments.py — SegmentSource.build, _segments; grounding.py — SAMSegmenter", contract: "b", effort: "M",
+    effect: () => "Not timed (needs the HF models); paid once per dataset, segmenter and backbone",
+    what: `<p><code>SegmentSource.build</code> opens each image, unpacks its masks to full resolution, crops and
+      transforms every segment on the main thread before the encoder sees a batch, and the mask step opens every image
+      again. <code>SAMSegmenter.from_boxes</code> embeds one image at a time. Moving decode, unpack and crop into a
+      <code>DataLoader</code> with workers keeps the outputs identical; batching SAM image embeddings across a
+      <code>batch_size</code> group is a float-level change.</p>`,
+    changes: [
+      "A worker-friendly dataset over (path, records) that returns transformed crops.",
+      "<code>SAMSegmenter.embed_many(images)</code>, used by <code>GroundedSAM.propose</code>.",
+      "<code>num_workers</code> is a new constructor kwarg that only schedules work, so it stays out of <code>self.kw</code> and the cache key, like <code>batch_size</code>.",
+    ],
+    code: `# instances/segments.py
+self.kw = {"encode": encode, "margin": margin, "background": background}   # unchanged
+self.num_workers = num_workers                                              # not in the key`,
+    verify: "Compare a cached InstanceSplit built both ways using the stub detector and SAM from tests/test_segmil.py.",
+  },
+  {
+    id: "P12", title: "Run independent sweep configs in parallel",
+    where: "pipeline.py — sweep; cli.py — sweep --jobs", contract: "b", effort: "M",
+    effect: () => "Up to cores ÷ threads per run for CPU sweeps of small frozen runs",
+    what: `<p>Runs are independent once the feature cache exists. A <code>--jobs N</code> flag would fan configs out to
+      worker processes after a serial pass that fills the shared caches, one config per dataset/backbone group. Combined
+      with P1, each worker keeps its own context.</p>`,
+    changes: [
+      "Workers return result rows, and only the parent appends to the JSONL. Concurrent appends can lose rows, as <code>koh2020_modal.py</code> already notes.",
+      "Requires the atomic cache writes from P8.",
+      "Each worker sets <code>torch.set_num_threads(cores // N)</code>. CPU matmul reductions depend on the thread count, so results can differ in the last bits from a serial run. Record the thread count in the row.",
+    ],
+    code: `# cli.py
+s.add_argument("--jobs", type=int, default=1, help="parallel worker processes for frozen-backbone runs")`,
+    verify: "Compare a --jobs 4 synthetic sweep with a serial one using allclose on every metric.",
+  },
+];
+
+const ROLLOUT = [
+  "<strong>P2, P9.</strong> Under an hour each and contract A/D. P2 shortens every fresh process that builds CUB, including each fine-tuning container.",
+  "<strong>P1.</strong> Context reuse for frozen sweeps. It halves the measured frozen CUB runs, and the Modal ablation container runs them back to back.",
+  "<strong>P3, P5, P6.</strong> Training, evaluator and extraction refactors, each landing with a before/after equality test.",
+  "<strong>P4.</strong> The cached val pass. It cuts each fine-tuning epoch by about a sixth without changing a result.",
+  "<strong>P8, then P12.</strong> Atomic cache writes come first, because parallel sweeps depend on them.",
+  "<strong>P10, P11.</strong> These matter once LLM discovery or SEG-MIL sweeps run at CUB scale.",
+  "<strong>P7.</strong> Opt-in fine-tuning flags plus a GPU input pipeline, and an ablation that measures their effect on the metrics before any anchor adopts them.",
+];
+
+/* ---------------- render ---------------- */
+function render() {
+  const s = S();
+  $("#findings").innerHTML = [
+    [pct(s.reuse_seq), `<strong>Reusing the context</strong> between sweep runs cut a frozen sequential CUB run from ${sec(s.reuse_seq.before)} to ${sec(s.reuse_seq.after)} with identical metrics. Building the CUB dataset is about half of every fresh run (P1, P2).`],
+    [`${ratio(s.concept_phase).toFixed(1)}–${ratio(s.head_cpu).toFixed(1)}×`, `<strong>Training phases on frozen features</strong> repeat normalization and frozen concept predictions each step. Doing it once gives bit-identical weights (P3).`],
+    [pct(s.ft_epoch_valcache), `<strong>Fine-tuning epochs</strong> wait ${sec(DATA.ft.epoch[0].val_wait)} for the val images to be decoded again. Keeping them in memory removes the wait without changing a result (P4).`],
+    [`${ratio(s.leak).toFixed(1)}×`, `<strong>Leakage interventions</strong> rerun the concept layer 17 times. One pass and replayed masks give identical logits (P5).`],
+    [pct(s.ft_epoch_amp), `<strong>bf16 + channels-last</strong> makes train compute ${ratio(s.ft_compute).toFixed(1)}× faster, but the dataloader then sets the pace. It is opt-in and needs a faster input pipeline to pay off (P7).`],
+  ].map(([f, t]) => `<li><span class="fig">${f}</span><span class="txt">${t}</span></li>`).join("");
+
+  /* where the time goes */
+  const groups = [["data", "Dataset & features", "--s1"], ["concept", "Concept phase", "--s2"], ["head", "Head phase", "--s3"], ["eval", "Evaluation", "--s4"]];
+  legend($("#timeLegend"), groups);
+  const short = (l) => l.replace("Independent", "Indep.").replace("Sequential", "Seq.").replace(" · reused context", " · reuse");
+  hbar($("#timeChart"), DATA.profile.rows.map(r => ({
+    label: r.label, short: short(r.label),
+    segs: groups.map(([k, n, c]) => ({ value: r.groups[k], color: `var(${c})`,
+      tip: `<b>${r.label}</b>${rows([[n, sec(r.groups[k])], ["Run total", sec(r.total)]])}` })),
+  })), { aria: "Stacked bars: seconds per pipeline step for six frozen CUB runs", labelW: 250, labelWNarrow: 150,
+    tick: (t) => `${t} s`, endLabel: (it, acc) => `${acc.toFixed(0)} s` });
+  $("#timeTable").innerHTML = table(["Run", ...groups.map(g => g[1]), "Total"],
+    DATA.profile.rows.map(r => [r.label, ...groups.map(([k]) => fmt(r.groups[k], 1)), fmt(r.total, 1)]), [1, 2, 3, 4, 5]);
+
+  /* pipeline map */
+  const stages = [
+    ["Context", "context.py · data/", ["P1", "P2", "P6", "P8"]], ["Discovery", "stages/discovery.py", []],
+    ["Filtering", "stages/filtering.py", ["P10"]], ["Alignment", "stages/alignment.py", []],
+    ["Instances", "instances/", ["P11"]], ["Training", "stages/training.py", ["P3", "P4", "P7"]],
+    ["Evaluation", "evaluation/", ["P5"]], ["Sweep", "pipeline.py · results.py", ["P1", "P9", "P12"]],
+  ];
+  $("#pipe").innerHTML = stages.map(([n, f, ids]) => `<div class="stage ${ids.length ? "hot" : ""}"><span class="name">${n}</span>
+    <span class="file">${f}</span><span class="ids">${ids.map(i => `<a href="#${i}">${i}</a>`).join("")}</span></div>`).join("");
+
+  /* speed-up factors */
+  const SP = [
+    ["Leakage interventions · CPU", s.leak, "P5"], ["CLIP-filter dedupe · CPU", s.dedupe, "P10"],
+    ["CUB attribute parsing · CPU", s.cub_parse, "P2"], ["Sequential head phase · CPU", s.head_cpu, "P3"],
+    ["Independent head phase · CPU", s.indep_head, "P3"], ["Concept phase · CPU", s.concept_phase, "P3"],
+    ["Extraction w/ patches · CPU", s.extract_cpu, "P6"], ["Extraction w/ patches · A100", s.extract_gpu, "P6"],
+    ["Sequential run, reused context · Modal", s.reuse_seq, "P1"], ["Fine-tune epoch, cached val · A100", s.ft_epoch_valcache, "P4"],
+    ["Sequential head phase · A100", s.head_gpu, "P3"],
+  ];
+  const t3 = (v) => v < 1 ? `${(v * 1000).toFixed(v < 0.01 ? 2 : 1)} ms` : `${v.toFixed(2)} s`;
+  hbar($("#speedChart"), SP.map(([l, d, p]) => ({
+    label: l, short: l.replace(" · ", ", ").replace("Independent", "Indep.").replace("Sequential", "Seq.").replace("Extraction w/ patches", "Extraction").replace("interventions", "interv."),
+    segs: [{ value: ratio(d), color: "var(--s1)", tip: `<b>${l}</b> · ${p}${rows([["Current", t3(d.before)], ["Proposed", t3(d.after)], ["Per", d.per]])}` }],
+  })), { aria: "Bars: speed-up factor per benchmark", labelW: 250, labelWNarrow: 160, tick: (t) => `${t}×`, endLabel: (it, a) => `${a.toFixed(1)}×` });
+  $("#speedTable").innerHTML = table(["Benchmark", "Proposal", "Current", "Proposed", "Per", "Factor"],
+    SP.map(([l, d, p]) => [l, p, t3(d.before), t3(d.after), d.per, `${ratio(d).toFixed(1)}×`]), [2, 3, 5]);
+
+  /* fine-tuning: step throughput */
+  const ft = DATA.ft, base = ft.modes[0].ips;
+  const modeName = (n) => n.replace("bf16+channels_last+compile", "bf16 + channels-last + compile").replace("bf16+channels_last", "bf16 + channels-last").replace("channels_last", "channels-last");
+  $("#ftSub").textContent = `Images per second for forward, backward and SGD step, batch 64 at 299 px, images already on the GPU (${ft.gpu}).`;
+  hbar($("#ftChart"), ft.modes.map(m => ({ label: modeName(m.name), short: modeName(m.name).replace(" + compile", " + cmp"),
+    segs: [{ value: m.ips, color: "var(--s1)", tip: `<b>${modeName(m.name)}</b>${rows([["Images / s", fmt(m.ips, 0)], ["Step (64 images)", `${fmt(m.step * 1000, 0)} ms`], ["vs fp32", `${(m.ips / base).toFixed(2)}×`]])}` }] })),
+    { aria: "Bars: fine-tuning images per second by precision mode", labelW: 250, labelWNarrow: 170, tick: (t) => `${t}`, endLabel: (it, a) => `${a.toFixed(0)}/s` });
+  $("#ftTable").innerHTML = table(["Mode", "Images / s", "ms / step", "vs fp32"],
+    ft.modes.map(m => [modeName(m.name), fmt(m.ips, 0), fmt(m.step * 1000, 0), `${(m.ips / base).toFixed(2)}×`]), [1, 2, 3]);
+
+  /* fine-tuning: epoch split */
+  const eg = [["train_compute", "Train compute", "--s1"], ["train_wait", "Train data wait", "--s2"], ["val_compute", "Val compute", "--s3"], ["val_wait", "Val data wait", "--s4"]];
+  legend($("#epLegend"), eg);
+  const etotal = (e) => eg.reduce((a, [k]) => a + e[k], 0);
+  hbar($("#epChart"), ft.epoch.map(e => ({ label: e.label,
+    segs: eg.map(([k, n, c]) => ({ value: e[k], color: `var(${c})`, tip: `<b>${e.label}</b>${rows([[n, sec(e[k])], ["Epoch", sec(etotal(e))]])}` })) })),
+    { aria: "Stacked bars: seconds of data wait and compute per fine-tuning epoch", labelW: 210, labelWNarrow: 150, tick: (t) => `${t} s`, endLabel: (it, a) => `${a.toFixed(1)} s` });
+  $("#epTable").innerHTML = table(["Variant", ...eg.map(g => g[1]), "Epoch"],
+    ft.epoch.map(e => [e.label, ...eg.map(([k]) => fmt(e[k], 2)), fmt(etotal(e), 2)]), [1, 2, 3, 4, 5]);
+  const [cur, amp, cache] = ft.epoch;
+  $("#ftNote").innerHTML = `<p>In fp32 the epoch is compute-bound: the training batches arrive almost as fast as the GPU
+      takes them (${sec(cur.train_wait)} of waiting, mostly the first batch). With bf16 and channels-last, compute drops
+      from ${sec(cur.train_compute)} to ${sec(amp.train_compute)}, and the wait grows to ${sec(amp.train_wait)}: the 8
+      loader workers now set the pace, so the whole epoch improves by only ${pct(S().ft_epoch_amp).replace("−", "")}.
+      The val pass is the cheaper win. It costs ${sec(cur.val_wait)} of waiting for ${sec(cur.val_compute)} of compute on every
+      epoch, and caching it takes the epoch to ${sec(etotal(cache))} with identical results (P4).</p>
+    <p>At ${sec(etotal(cur))} per epoch and up to 300 epochs, one fine-tuned run takes up to ${(etotal(cur) * 300 / 60).toFixed(0)} minutes
+      of A100 time. With P4 alone that becomes ${(etotal(cache) * 300 / 60).toFixed(0)}. If the input pipeline also kept up with
+      bf16 compute, an epoch would approach ${sec(amp.train_compute + cache.val_compute)}.</p>`;
+  $("#mmapCell").textContent = `${ms(DATA.mmap.before)} → ${ms(DATA.mmap.after)}`;
+
+  /* proposals */
+  const effort = { XS: "under an hour", S: "half a day", M: "1–2 days" };
+  $("#summaryRows").innerHTML = P.map(p => `<tr><td><a href="#${p.id}" class="mono">${p.id}</a></td><td>${p.title}</td>
+    <td class="effect">${p.effect()}</td><td>${chip(p.contract)}</td><td>${p.effort}</td></tr>`).join("");
+  const esc = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  $("#plist").innerHTML = P.map(p => `<article class="p" id="${p.id}"><div class="pid">${p.id}</div><div class="body">
+    <h3>${p.title}</h3>
+    <div class="meta">${chip(p.contract)}<span>Effort <span class="mono">${p.effort}</span> · ${effort[p.effort]}</span><span class="mono">${p.where}</span></div>
+    <dl class="kv"><dt>Effect</dt><dd class="effect">${p.effect()}</dd></dl>
+    ${p.what}
+    <dl class="kv"><dt>Changes</dt><dd><ul>${p.changes.map(c => `<li>${c}</li>`).join("")}</ul></dd>
+      <dt>Verify</dt><dd>${p.verify}</dd></dl>
+    <pre><code>${esc(p.code)}</code></pre></div></article>`).join("");
+  $("#rollout").innerHTML = ROLLOUT.map(r => `<li>${r}</li>`).join("");
+}
+render();
+let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(render, 150); });
+</script>
+</body>
+</html>

@@ -1,0 +1,167 @@
+CBM-Eval: additional training speed-ups (P13-P16)
+==================================================
+
+Follow-up to reports/speedups.html (P1-P12). Branch perf/speedup-report, 6 Oct 2026.
+Measured with scripts/speedup_bench_modal.py::training (A100-SXM4-40GB, 16 vCPU) and
+local CPU benchmarks (Apple M-series, 8 torch threads), on CUB-sized inputs:
+4,796 train images, D = 2048 features, K = 112 concepts, batch 256, 200 epochs.
+
+Results contract (same labels as the report):
+  A = identical outputs, lands in place with an equality test
+  B = last-digit float differences, lands in place with an allclose test; say so in the commit
+  C = changes results, opt-in kwarg or new registered variant
+  D = caches / sweep bookkeeping only
+
+
+P13  Train all seeds of a config at once on the GPU
+---------------------------------------------------
+Contract: B          Effort: L (2-4 days)
+Where:    pipeline.py (sweep grouping), stages/base.py (Training flag), stages/training.py
+
+Measured: frozen concept phase, 9 seeds, A100
+          serial (fused Adam)        20.1 s
+          batched (bmm, one Adam)     2.5 s   -> 7.9x
+          on CPU the same batching gives only 1.1x (CPU is already compute-bound)
+
+Why: on the GPU the frozen phases are bound by kernel-launch overhead, not compute.
+Stacking the seeds' weights as (S, D, K) and running one batched matmul costs about
+the same as training a single seed.
+
+How it fits the architecture:
+  - Capability flag on the base class with a safe default (rule 2):
+    Training.supports_seed_batch = False; Sequential / Independent / Joint set True.
+  - sweep groups configs whose run_id is equal (they differ only in seed) and hands the
+    group to one training call. Each member keeps its own init (seeded per member) and
+    its own batch order (torch.Generator per seed), and gets its own results row.
+  - Only valid when everything upstream is seed-independent. `select: random` and VLM
+    discovery draw from the seed, so check that the filtered concept names (and
+    alignment targets) match across the group, and fall back to serial runs if not.
+  - Pairs with P1 (context reuse): the group shares one Context.
+  - Makes the GPU the faster device for frozen runs; keep CPU as the default otherwise.
+
+Integration cost (review, 6 Oct): higher than the flag suggests.
+  - Batchability depends on the concept layer and head, not the training variant, so the flag
+    sits on the wrong class. Every ConceptLayer / PredictorHead needs a leading seed axis, or
+    torch.func stacking + vmap, which SparseHead.proximal_step (in-place), ResidualHead's
+    phases, _ImbalanceWeightedConcepts' state on self and the MIL max-pooling scatter resist.
+  - Early stopping is per seed: best state, patience and stop epoch must be tracked per member,
+    and Adam keeps moving a stopped member through its momentum.
+  - run() is one config -> one row; a group needs per-seed discovery/filter/alignment/build
+    (the init draws come after discovery), one joint fit, then per-member eval/save, plus
+    handling of partly skipped groups and a failing member.
+  - "B" is optimistic: last-digit differences accumulate over 200 epochs and can flip the 1e-5
+    early-stopping test. It also moves training to the GPU while existing rows are CPU runs.
+  Cheaper alternative with no library change: fan seeds out over processes / Modal containers.
+
+Verify: train the synthetic anchor's 3 seeds batched vs serial; allclose on weights and
+metrics.
+
+
+P14  CUDA graphs for the frozen training loop
+---------------------------------------------
+Contract: B          Effort: M (1-2 days)
+Where:    stages/training.py (optimize), opt-in via a training kwarg, e.g. cuda_graph: true
+
+Measured: frozen concept phase, 200 epochs, A100
+          eager Adam                  2.66 s
+          fused Adam                  2.24 s   -> 1.19x
+          whole step as a CUDA graph  0.74 s   -> 3.6x   (max weight diff 7.7e-7)
+
+How:
+  - Capture forward, backward, optimizer step (Adam(capturable=True)) and
+    head.proximal_step() once on a side stream; replay per minibatch after copying the
+    batch indices into a static buffer.
+  - The current loop keeps a smaller last batch (4,796 % 256 = 188), so capture a second
+    graph for that tail batch to keep the exact same batches as today.
+  - Validation, early stopping and best-state copies stay outside the graph.
+  - Only useful when training runs on the GPU; combine with P13.
+
+Verify: allclose on weights vs eager for every training variant on the synthetic anchor.
+
+
+P15  Decode each fine-tuning image once and keep it in memory
+-------------------------------------------------------------
+Contract: A          Effort: S (half a day)
+Where:    data/base.py (_SampleDataset) / Context.image_split, not stages/training.py
+
+Measured: fine-tuning loader, 8 workers, Koh et al. train transform, A100 box
+          current (decode every epoch)   472 img/s steady
+          decoded uint8 arrays in RAM    584 img/s steady   -> 1.24x
+          first augmented batch bit-identical with the same loader seed
+          cost: 2.9 GB RAM, 18 s one-time decode per process
+          locally, JPEG decode is 1.3 ms and augmentation 0.9 ms per image (58% decode)
+
+How: decode with Image.open(p).convert("RGB") once into numpy arrays before the
+DataLoader forks its workers (shared copy-on-write), and have __getitem__ call
+Image.fromarray(array) instead of opening the file. The augmentation RNG is untouched,
+so outputs are identical. Optionally store the arrays on disk under cache_dir/decoded/
+to skip the 18 s on later runs (new cache kind -> add to tests/test_cache_keys.py).
+
+Review (6 Oct): not worth it yet. The fp32 anchors are compute-bound (speedups.html: 1.97 s data
+wait, mostly the first batch, vs 9.55 s compute per epoch), so the 1.24x loader gain barely shows.
+On macOS the DataLoader spawns workers rather than forking, and they are not persistent, so the
+2.9 GB would be pickled to each of 8 workers every epoch. If it is built, prefer the on-disk
+decoded cache read through np.memmap (works with fork and spawn).
+
+Limit: not enough to make bf16 (P7) pay off; bf16 compute needs ~880 img/s. Closing that
+gap needs decode + augmentation on the GPU (nvJPEG via torchvision.io.decode_jpeg on
+cuda, or DALI, with torchvision.transforms.v2 on GPU tensors). That changes the
+augmentation RNG stream, so it is contract C and belongs behind Finetune.gpu_augment.
+
+
+P16  Compute segment bags on packed instances, not padding
+----------------------------------------------------------
+Contract: B          Effort: S (half a day)            Status: implemented
+Where:    structures.py (Bag.on_rows), stages/training.py (Batch.concept_logits)
+
+Measured (CPU, concept loss fwd+bwd, B=256, M=16, K=112, image-level targets):
+          real share   D=768            D=2048
+          ~0.27        2.6 -> 1.0 ms    5.8 -> 2.3 ms   -> ~2.5x
+          ~0.48        2.6 -> 1.6 ms    5.7 -> 3.9 ms   -> ~1.5x
+          ~0.67        2.9 -> 2.2 ms    5.8 -> 4.8 ms   -> ~1.2x
+Contract is B, not A: the weight gradient sums over fewer rows, so trained weights move by
+~1e-6 relative (tests/test_training.py, allclose). The MIL attention's last bias moves by ~1e-2:
+it shifts every instance's attention logit equally, so its gradient is rounding noise that Adam
+scales to lr-sized steps; it cannot change an output. Existing segment-bag runs shift at that level.
+
+Original note: Segment bags are zero-padded to M instances
+per image (max_segments: 16), and the concept layer runs on every padded slot. Compute
+on the real rows only (instance_rows / Bag.rows -> (n_real, D)) and scatter the result
+back into (N, M, K). The saving equals the padding share, which every run already logs:
+1 - instances.per_image / instances.max. Patch bags have no padding and gain nothing.
+
+Verify: tests/test_training.py::test_padded_bags_train_on_real_instances_only pads patch bags
+per image and compares packed vs padded training for sequential, joint, embeddings and
+segment_clip + cosine.
+
+
+Checked and not recommended
+---------------------------
+  - Custom kernels (Triton / CUDA):
+      CPU frozen loop after P3 already runs at ~550 GFLOP/s, close to hardware peak.
+      GPU frozen loop is launch-bound; CUDA graphs (P14) remove that without a kernel,
+      and fusing gather + matmul + loss saves only ~2 MB of memory traffic per step.
+      Fine-tuning convolutions already run on cuDNN; torch.compile provides the fusion
+      (bf16 + channels-last: 1.93x -> 2.17x with compile).
+      MIL pooling (masked max, attention softmax) is tiny next to the concept matmul.
+  - Fused / foreach Adam on CPU: not identical. Fused Adam moves weights by ~1e-7 relative
+    after 30 epochs in 19 of 25 training configs (contract B, not A). Warm timing: concept phase
+    10.9 -> 9.1 ms/epoch (1.2x), head phase unchanged, about 0.4 s of a ~30 s run. Not worth a
+    float-level change to every CPU run. foreach gives nothing.
+  - Batched seeds on CPU: 1.1x, not worth the complexity without a GPU.
+  - Full-batch L-BFGS instead of 200 epochs of minibatch Adam: 0.2 s, but val loss 6.2
+    vs 1.0; it overfits without added L2 / early stopping. That is a different model
+    selection regime (contract C, new registered training variant), not a speed-up.
+
+
+Suggested order (revised 6 Oct)
+-------------------------------
+  1. P16: done.
+  2. P15 only if bf16 fine-tuning (P7) is adopted; then as a memmap disk cache.
+  3. P13 + P14 together, only if frozen sweeps move to the GPU and per-process seed fan-out is
+     not enough. P14 also needs a graph_safe flag on ConceptLayer / PredictorHead (default False,
+     eager fallback), since capture forbids .item(), data-dependent shapes (Bag.rows) and CPU
+     tensors (PredictorHead.penalty); and its switch should not enter the run_id.
+
+Also added (not a speed-up): stages.training.optimizer / momentum / weight_decay, so the Koh et
+al. anchors can express SGD for the concept layer and head. Default Adam keeps every run id.
