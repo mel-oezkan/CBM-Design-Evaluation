@@ -12,6 +12,7 @@ The predictor of independent / sequential is then fitted on the fine-tuned encod
 from __future__ import annotations
 
 import copy
+import dataclasses
 from dataclasses import dataclass
 from typing import Callable, Iterator
 
@@ -36,12 +37,17 @@ def concept_loss(layer: ConceptLayer, x: torch.Tensor, targets: torch.Tensor, ba
     (1 - cosine between each concept vector and its target vector, as in SEG-MIL-CBM).
     Image-level (N, K) targets on a bag supervise the max over instances (standard MIL).
     """
-    logits = layer.concept_logits(x)
+    return concept_loss_from_logits(layer.concept_logits(x), targets, bag, kind, layer.target_type)
+
+
+def concept_loss_from_logits(logits: torch.Tensor, targets: torch.Tensor, bag: Bag | None = None,
+                             kind: str = "auto", target_type: str | None = None) -> torch.Tensor:
+    """``concept_loss`` of concept logits (N, K) or (N, M, K) that are already computed."""
     if logits.dim() == 3 and targets.dim() == 2:
         logits = bag.max(logits) if bag is not None else logits.amax(1)
         bag = None
     if kind == "auto":
-        kind = "bce" if layer.target_type == "binary" else "mse"
+        kind = "bce" if target_type == "binary" else "mse"
     if kind == "bce":
         per = F.binary_cross_entropy_with_logits(logits, targets, reduction="none").mean(-1)
     elif kind == "mse":
@@ -55,34 +61,77 @@ def concept_loss(layer: ConceptLayer, x: torch.Tensor, targets: torch.Tensor, ba
 
 @dataclass
 class Batch:
-    """Inputs, labels, concept targets and (for instance bags) the bag, indexed together."""
+    """Inputs, labels, concept targets and (for instance bags) the bag, indexed together.
 
-    x: torch.Tensor
+    On frozen features, work that cannot change during a phase is done once over the whole split:
+    ``xn`` holds ``x`` normalized by the concept layer, ``c`` a frozen layer's concept predictions.
+    ``x`` (and ``xn``) are None once neither the concept layer nor the head reads them.
+    """
+
+    x: torch.Tensor | None
     y: torch.Tensor
     t: torch.Tensor | None = None
     bag: Bag | None = None
+    xn: torch.Tensor | None = None
+    c: torch.Tensor | None = None
 
     def __len__(self) -> int:
         return len(self.y)
 
+    def _map(self, fn) -> "Batch":
+        return Batch(**{f.name: None if (v := getattr(self, f.name)) is None else fn(v)
+                        for f in dataclasses.fields(self)})
+
     def __getitem__(self, idx) -> "Batch":
-        return Batch(self.x[idx], self.y[idx], None if self.t is None else self.t[idx],
-                     None if self.bag is None else self.bag[idx])
+        return self._map(lambda v: v[idx])
 
     def to(self, device) -> "Batch":
-        return Batch(self.x.to(device), self.y.to(device), None if self.t is None else self.t.to(device),
-                     None if self.bag is None else self.bag.to(device))
+        return self._map(lambda v: v.to(device))
+
+    def normalized(self, layer: ConceptLayer) -> torch.Tensor:
+        """The features through ``layer.normalize``: ``xn`` if precomputed, else computed now."""
+        return self.xn if self.xn is not None else layer.normalize(self.x)
+
+    def concept_logits(self, layer: ConceptLayer, xn: torch.Tensor | None = None) -> torch.Tensor:
+        """``layer``'s concept logits (N, K) or (N, M, K), from ``xn`` if the caller already normalized the
+        features. On a zero-padded bag only the real instances are computed (the padding stays 0)."""
+        xn = self.xn if xn is None else xn
+        if self.bag is not None and self.bag.padded:
+            return self.bag.on_rows(layer.concept_logits, self.x) if xn is None else \
+                self.bag.on_rows(layer.logits_from_normalized, xn)
+        return layer.logits_from_normalized(self.normalized(layer) if xn is None else xn)
+
+    def without_x(self) -> "Batch":
+        return dataclasses.replace(self, x=None, xn=None)
 
 
-ParamGroup = tuple[list[nn.Parameter], str, float]  # (params, "adam" | "sgd", lr)
+OPTIMIZERS = ("adam", "sgd")
+
+
+@dataclass(frozen=True)
+class OptimizerSpec:
+    """The optimizer of one parameter group: ``adam``, or ``sgd`` with ``momentum``; both with ``weight_decay``."""
+
+    kind: str = "adam"
+    lr: float = 1e-3
+    momentum: float = 0.0
+    weight_decay: float = 0.0
+
+    def build(self, params: list[nn.Parameter]) -> torch.optim.Optimizer:
+        if self.kind == "sgd":
+            return torch.optim.SGD(params, lr=self.lr, momentum=self.momentum, weight_decay=self.weight_decay)
+        return torch.optim.Adam(params, lr=self.lr, weight_decay=self.weight_decay)
+
+
+ParamGroup = tuple[list[nn.Parameter], OptimizerSpec]
 
 
 def _optimizers(groups: list[ParamGroup]) -> list[torch.optim.Optimizer]:
     opts = []
-    for params, kind, lr in groups:
+    for params, spec in groups:
         params = [p for p in params if p.requires_grad]
         if params:
-            opts.append(torch.optim.SGD(params, lr=lr) if kind == "sgd" else torch.optim.Adam(params, lr=lr))
+            opts.append(spec.build(params))
     return opts
 
 
@@ -149,13 +198,11 @@ class Finetune:
     num_workers: int = 4
 
     def __post_init__(self):
-        if self.optimizer not in ("sgd", "adam"):
+        if self.optimizer not in OPTIMIZERS:
             raise ValueError(f"Unknown finetune optimizer '{self.optimizer}' (use 'sgd' or 'adam')")
 
     def make_optimizer(self, params) -> torch.optim.Optimizer:
-        if self.optimizer == "sgd":
-            return torch.optim.SGD(params, lr=self.lr, momentum=self.momentum, weight_decay=self.weight_decay)
-        return torch.optim.Adam(params, lr=self.lr, weight_decay=self.weight_decay)
+        return OptimizerSpec(self.optimizer, self.lr, self.momentum, self.weight_decay).build(params)
 
 
 class _ImageFeed:
@@ -240,13 +287,23 @@ def optimize_images(groups: list[ParamGroup], modules: list[nn.Module], feed: _I
 
 
 class _Base(Training):
+    """Shared by every variant. ``optimizer`` (``adam``, or ``sgd`` with ``momentum``; both with
+    ``weight_decay``) at ``lr`` fits the concept layer and every head that does not bring its own
+    (``PredictorHead.optimizer``, e.g. the sparse head's plain SGD)."""
+
     def __init__(self, epochs: int = 200, concept_epochs: int | None = None, batch_size: int = 256,
                  lr: float = 1e-3, patience: int = 10, concept_loss: str = "auto", device: str = "cpu",
-                 finetune: dict | None = None):
+                 finetune: dict | None = None, optimizer: str = "adam", momentum: float = 0.0,
+                 weight_decay: float = 0.0):
         if concept_loss not in CONCEPT_LOSSES:
             raise ValueError(f"Unknown concept loss '{concept_loss}' (use one of {CONCEPT_LOSSES})")
+        if optimizer not in OPTIMIZERS:
+            raise ValueError(f"Unknown optimizer '{optimizer}' in `stages.training.optimizer` (use one of {OPTIMIZERS})")
+        if momentum and optimizer != "sgd":  # would change the run_id without changing the run
+            raise ValueError("`stages.training.momentum` needs `stages.training.optimizer: sgd`")
         self.epochs, self.concept_epochs = epochs, concept_epochs or epochs
         self.batch_size, self.lr, self.patience = batch_size, lr, patience
+        self.optimizer, self.momentum, self.weight_decay = optimizer, momentum, weight_decay
         self.concept_loss, self.device = concept_loss, device
         self.finetune = Finetune(**finetune) if finetune else None  # unknown keys raise TypeError
 
@@ -287,8 +344,15 @@ class _Base(Training):
         if not aligned.has_targets:
             layer.calibrate(tr.x, tr.bag)
 
+    @staticmethod
+    @torch.no_grad()
+    def _normalized(layer: ConceptLayer, *batches: Batch) -> list[Batch]:
+        """The batches with ``xn`` precomputed (after ``_prepare`` fixed the input statistics). Instance
+        bags are normalized per minibatch instead, since a second copy of a patch bag can run to gigabytes."""
+        return [b if b.x.dim() == 3 else dataclasses.replace(b, xn=layer.normalize(b.x)) for b in batches]
+
     def _concept_loss(self, layer: ConceptLayer, b: Batch) -> torch.Tensor:
-        return concept_loss(layer, b.x, b.t, b.bag, self.concept_loss)
+        return concept_loss_from_logits(b.concept_logits(layer), b.t, b.bag, self.concept_loss, layer.target_type)
 
     def _task_loss(self, logits: torch.Tensor, b: Batch) -> torch.Tensor:
         """Class logits (N, C) -> scalar task loss. The one place every variant computes it; override
@@ -301,29 +365,37 @@ class _Base(Training):
             if not aligned.has_targets:
                 raise ValueError("`finetune:` with independent / sequential training needs concept targets "
                                  "(an alignment with targets, e.g. `human`); use `joint` to fine-tune without")
-            log = optimize_images([(layer.concept_params(), "adam", self.lr)], [layer], feed,
+            log = optimize_images([(layer.concept_params(), self._optimizer())], [layer], feed,
                                   lambda b: self._concept_loss(layer, b), lambda b: self._concept_loss(layer, b))
             return {"finetune_epochs": log["epochs"], "concept_val_loss": log["val_loss"]}
         if not aligned.has_targets or layer.frozen:
             return {}
-        log = optimize([(layer.concept_params(), "adam", self.lr)], [layer], len(tr),
+        log = optimize([(layer.concept_params(), self._optimizer())], [layer], len(tr),
                        lambda idx: self._concept_loss(layer, tr[idx]),
                        lambda: float(self._concept_loss(layer, va)),
                        self.concept_epochs, self.batch_size, self.patience, seed)
         return {"concept_epochs": log["epochs"], "concept_val_loss": log["val_loss"]}
 
-    def _head_group(self, head: PredictorHead, params: list[nn.Parameter]):
-        return (params, head.optimizer, head.lr or self.lr)
+    def _optimizer(self, lr: float | None = None) -> OptimizerSpec:
+        return OptimizerSpec(self.optimizer, lr or self.lr, self.momentum, self.weight_decay)
+
+    def _head_group(self, head: PredictorHead, params: list[nn.Parameter]) -> ParamGroup:
+        if head.optimizer is not None:  # the head's own optimizer, as it asks for it (plain, no decay)
+            return params, OptimizerSpec(head.optimizer, head.lr or self.lr)
+        return params, self._optimizer(head.lr)
 
     def _fit_head(self, layer, head, tr: Batch, va: Batch, rep_fn: Callable[[Batch], torch.Tensor],
                   seed) -> dict[str, float]:
+        """Fit the head on ``rep_fn(batch)``, which reads features only through ``layer.represent``."""
         out: dict[str, float] = {}
+        if not (layer.represent_uses_x or head.uses_features):
+            tr, va = tr.without_x(), va.without_x()  # minibatches then index (N, K) tensors only
 
         def task_loss(b: Batch) -> torch.Tensor:
-            return self._task_loss(head(rep_fn(b), layer.normalize(b.x), b.bag), b)
+            return self._task_loss(head(rep_fn(b), b.normalized(layer) if head.uses_features else None, b.bag), b)
 
         for i, phase in enumerate(head.phases()):
-            groups = [self._head_group(head, phase)] + ([(layer.rep_params(), "adam", self.lr)] if i == 0 else [])
+            groups = [self._head_group(head, phase)] + ([(layer.rep_params(), self._optimizer())] if i == 0 else [])
             log = optimize(groups, [layer, head], len(tr), lambda idx: task_loss(tr[idx]) + head.penalty(),
                            lambda: float(task_loss(va)), self.epochs, self.batch_size,
                            self.patience, seed + i, after_step=head.proximal_step)
@@ -343,16 +415,22 @@ class Sequential(_Base):
 
     def _fit(self, layer, head, aligned, tr, va, seed, feed=None):
         self._prepare(layer, aligned, tr)
+        tr, va = self._normalized(layer, tr, va)
         log = self._fit_concepts(layer, aligned, tr, va, seed, feed)
         if feed is not None:  # the head sees the fine-tuned encoder's features
-            tr, va = feed.encode("train"), feed.encode("val")
+            tr, va = self._normalized(layer, feed.encode("train"), feed.encode("val"))
+        tr, va = self._frozen_concepts(layer, tr), self._frozen_concepts(layer, va)
+        return log | self._fit_head(layer, head, tr, va, lambda b: layer.represent(b.c, b.x), seed + 1)
 
-        def rep(b):
-            with torch.no_grad():
-                c_hat = layer.activate(layer.concept_logits(b.x))
-            return layer.represent(c_hat, b.x)
-
-        return log | self._fit_head(layer, head, tr, va, rep, seed + 1)
+    @torch.no_grad()
+    def _frozen_concepts(self, layer: ConceptLayer, b: Batch) -> Batch:
+        """``b`` with the frozen concept layer's predictions ``c``, computed once rather than every step."""
+        if b.xn is not None:
+            c = layer.activate(layer.logits_from_normalized(b.xn))
+        else:  # instance bags, in chunks so that the normalized bag never exists in full
+            c = torch.cat([layer.activate(b[i:i + self.batch_size].concept_logits(layer))
+                           for i in range(0, len(b), self.batch_size)])
+        return dataclasses.replace(b, c=c)
 
 
 @TRAINING.register("independent")
@@ -366,9 +444,10 @@ class Independent(_Base):
 
     def _fit(self, layer, head, aligned, tr, va, seed, feed=None):
         self._prepare(layer, aligned, tr)
+        tr, va = self._normalized(layer, tr, va)
         log = self._fit_concepts(layer, aligned, tr, va, seed, feed)
         if feed is not None:
-            tr, va = feed.encode("train"), feed.encode("val")
+            tr, va = self._normalized(layer, feed.encode("train"), feed.encode("val"))
         return log | self._fit_head(layer, head, tr, va, lambda b: layer.represent(b.t, b.x), seed + 1)
 
 
@@ -382,16 +461,18 @@ class Joint(_Base):
 
     def _fit(self, layer, head, aligned, tr, va, seed, feed=None):
         self._prepare(layer, aligned, tr)
+        tr, va = self._normalized(layer, tr, va)
         use_c = aligned.has_targets and self.concept_weight > 0
 
         def total(b: Batch) -> torch.Tensor:
-            _, rep = layer(b.x)
-            loss = self._task_loss(head(rep, layer.normalize(b.x), b.bag), b)
+            xn = b.normalized(layer) if head.uses_features else None
+            rep = layer.represent(layer.activate(b.concept_logits(layer, xn)), b.x)  # = layer(b.x)[1]
+            loss = self._task_loss(head(rep, xn, b.bag), b)
             if use_c:
                 loss = loss + self.concept_weight * self._concept_loss(layer, b)
             return loss
 
-        groups = [(layer.concept_params() + layer.rep_params(), "adam", self.lr),
+        groups = [(layer.concept_params() + layer.rep_params(), self._optimizer()),
                   self._head_group(head, list(head.parameters()))]
         if feed is not None:  # encoder, concept layer and head together, on images
             log = optimize_images(groups, [layer, head], feed, lambda b: total(b) + head.penalty(), total,
@@ -425,7 +506,7 @@ class _ImbalanceWeightedConcepts:
             self.concept_weights = (1 - pos) / pos.clamp_min(1e-6)
 
     def _concept_loss(self, layer, b):
-        per = F.binary_cross_entropy_with_logits(layer.concept_logits(b.x), b.t, reduction="none")
+        per = F.binary_cross_entropy_with_logits(b.concept_logits(layer), b.t, reduction="none")
         return (per * self.concept_weights.to(per)).mean(-1).mean()
 
 

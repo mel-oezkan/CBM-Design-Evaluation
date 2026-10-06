@@ -10,6 +10,8 @@ from .base import AlignedConcepts, ConceptLayer, Generation
 
 
 class ScoreLayer(ConceptLayer):
+    represent_uses_x = False
+
     def __init__(self, in_dim, aligned):
         super().__init__(in_dim, aligned)
         self.rep_dim = self.n_concepts
@@ -24,6 +26,8 @@ class LogitScoreLayer(ConceptLayer):
     working); it is mapped back with ``logit`` clamped at ``eps``, so intervened 0/1 values become
     +-logit(1 - eps) instead of Koh et al.'s 5th/95th-percentile logits."""
 
+    represent_uses_x = False
+
     def __init__(self, in_dim, aligned, eps: float):
         super().__init__(in_dim, aligned)
         self.rep_dim, self.eps = self.n_concepts, eps
@@ -34,6 +38,8 @@ class LogitScoreLayer(ConceptLayer):
 
 class BagOfConceptsLayer(ConceptLayer):
     """Hard 0/1 concept presence; straight-through gradients during joint training."""
+
+    represent_uses_x = False
 
     def __init__(self, in_dim, aligned):
         super().__init__(in_dim, aligned)
