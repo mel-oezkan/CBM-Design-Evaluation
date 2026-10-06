@@ -16,6 +16,12 @@ def seed_everything(seed: int) -> None:
     torch.manual_seed(seed)
 
 
+def rng_state() -> tuple:
+    """The global CPU generators that ``seed_everything`` seeds, comparable with ``==``."""
+    kind, keys, *rest = np.random.get_state()
+    return random.getstate(), kind, keys.tobytes(), tuple(rest), torch.get_rng_state().numpy().tobytes()
+
+
 def resolve_device(device: str = "auto") -> torch.device:
     if device != "auto":
         return torch.device(device)

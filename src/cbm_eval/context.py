@@ -36,6 +36,7 @@ class Context:
         self.device = resolve_device(cfg.device)
         self.cache_dir = Path(cfg.paths["cache"])
         self.seed = cfg.seed
+        self.key: str | None = None  # set by PipelineBuilder when later runs may share this context
         self._splits: dict[tuple[str, str], FeatureSplit] = {}
         self._text: dict[tuple[str, str], torch.Tensor] = {}
         self.instance_source = instances
@@ -102,6 +103,14 @@ class Context:
             dataset, split = self.source(name)
             self._images[key] = dataset.torch_split(split, tf)
         return self._images[key]
+
+    def for_run(self, cfg: ExperimentConfig) -> "Context":
+        """Hand this context to the next run of a sweep (whose ``PipelineBuilder.context_key`` equals
+        ``key``): its config and seed, and no concepts or fine-tuned encoder of the previous run.
+        Only ``PipelineBuilder`` calls this."""
+        self.cfg, self.seed, self.concepts = cfg, cfg.seed, None
+        self.use_encoder(None)
+        return self
 
     def use_encoder(self, encoder: nn.Module | None, num_workers: int = 0) -> None:
         """Install (or, with None, remove) a fine-tuned encoder. Only ``PipelineBuilder`` calls this."""

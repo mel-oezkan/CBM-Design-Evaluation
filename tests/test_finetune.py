@@ -48,6 +48,13 @@ def test_inputs_are_the_fine_tuned_features(base_cfg):
     assert torch.allclose(ctx.inputs("test")[0], ToyBackbone().encode_images(images), atol=1e-5)
 
 
+
+def test_a_reused_context_drops_the_previous_runs_encoder(base_cfg):  # issue #2
+    res = run(_cfg(base_cfg, {"name": "joint", "epochs": 2, "finetune": FT}), save=False)
+    ctx = PipelineBuilder(base_cfg.with_overrides(HUMAN)).reuse(res.ctx)  # what run(cfg, ctx=...) does first
+    images = torch.stack([s.image for s in ctx.dataset.samples("train")])
+    assert torch.allclose(ctx.split("train").features, ToyBackbone().encode_images(images), atol=1e-5)
+
 def test_finetune_needs_a_trainable_backbone(base_cfg, monkeypatch):
     monkeypatch.setattr(ToyBackbone, "trainable", False)
     with pytest.raises(ValueError, match="trainable backbone"):
