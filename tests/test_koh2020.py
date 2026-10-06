@@ -1,5 +1,6 @@
-"""Koh et al. (2020) options on a tiny fake CUB (offline): the ``koh`` majority vote, the authors'
-train/val split via ``split_dir``, and the ``cub_koh2020`` anchor's components end to end."""
+"""CUB annotation parsing and Koh et al. (2020) options on a tiny fake CUB (offline): the ``koh``
+majority vote, the authors' train/val split via ``split_dir``, and the ``cub_koh2020`` anchor's
+components end to end."""
 
 import pickle
 
@@ -16,6 +17,19 @@ def _write_labels(root, label_fn):
     n_attr = len((root / "attributes" / "attributes.txt").read_text().splitlines())
     rows = [f"{i} {a + 1} {p} {c} 1.0" for i in ids for a in range(n_attr) for p, c in [label_fn(i, a)]]
     (root / "attributes" / "image_attribute_labels.txt").write_text("\n".join(rows))
+
+
+def test_attribute_labels_tolerate_lines_with_an_extra_column(cub_root):
+    _write_labels(cub_root, lambda i, a: ((i + a) % 2, 3))
+    path = cub_root / "attributes" / "image_attribute_labels.txt"
+    lines = path.read_text().splitlines()
+    lines[5] += " 0"  # the official file has 606 such lines
+    path.write_text("\n".join(lines))
+    ds = CUB(str(cub_root), class_level_concepts=False, val_fraction=0.0)
+    ids = {line.split()[1]: int(line.split()[0]) for line in (cub_root / "images.txt").read_text().splitlines()}
+    for s in ds.samples("train") + ds.samples("test"):
+        i = ids["/".join(s.image.split("/")[-2:])]
+        assert s.concepts == [(i + a) % 2 for a in range(len(ds.concept_names))]
 
 
 def test_koh_vote_ignores_not_visible_negatives_and_breaks_ties_to_present(cub_root):
