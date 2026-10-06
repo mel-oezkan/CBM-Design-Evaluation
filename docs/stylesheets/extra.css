@@ -97,6 +97,21 @@ body { -webkit-font-smoothing: antialiased; }
 }
 .md-nav__link--active { font-weight: 600; }
 
+/* Collapsible TOC entries (javascripts/toc-collapse.js); the toggle sits in the left gutter. */
+.md-nav--secondary .cbm-toc-parent { position: relative; }
+.md-nav--secondary .cbm-toc-collapsed > nav { display: none; }
+.cbm-toc-toggle {
+  position: absolute; left: -1.1em; top: .1em; width: 1em; height: 1.4em; padding: 0;
+  color: var(--cbm-muted); cursor: pointer;
+}
+.cbm-toc-toggle::before {
+  content: ""; display: block; width: .4em; height: .4em; margin: auto;
+  border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg); transition: transform .15s;
+}
+.cbm-toc-collapsed > .cbm-toc-toggle::before { transform: rotate(-45deg); }
+.cbm-toc-toggle:hover, .cbm-toc-toggle:focus-visible { color: var(--cbm-accent); }
+
 /* ---------- type ---------- */
 .md-typeset { line-height: 1.6; }
 .md-typeset h1, .md-typeset h2, .md-typeset h3, .md-typeset h4 {

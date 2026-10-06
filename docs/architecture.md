@@ -1,4 +1,7 @@
-# Architecture
+# Pipeline map
+
+This page maps the code: which module does what and which objects the stages pass to each other.
+For a step-by-step walk through one run, start with [How a run works](how-it-works.md).
 
 --8<-- "CLAUDE.md:architecture"
 
@@ -52,7 +55,7 @@ before generation because the concept layer is built from the aligned concepts.
 <div class="cbm-h-arrow">→</div>
 [**Analysis**<span>Effects models, Pareto frontiers</span>](api/evaluation.md){.cbm-node}
 </div>
-<p class="cbm-map-note" markdown>Dashed borders mark optional parts. Without `instances:`, each image is one feature vector of shape (N, D). With it, every stage runs per instance on (N, M, D) plus a validity mask; see [instance bags](instance-bags.md).</p>
+<p class="cbm-map-note" markdown>Dashed borders mark optional parts. Without `instances:`, each image is one feature vector of shape (N, D). With it, every stage runs per instance on (N, M, D) plus a validity mask; see the [SEG-MIL-CBM example](instance-bags.md).</p>
 </div>
 
 ## What each stage hands to the next
@@ -84,4 +87,47 @@ patch features.
 
 [Open the forward-pass diagram full size](assets/forward-pass.svg)
 
---8<-- "README.md:layout"
+## Layout
+
+| Part | Code (under `src/cbm_eval/`) |
+|---|---|
+| Experiment configs | `configs/anchors/*.yaml`, `configs/ablations/*.yaml`, `src/cbm_eval/config.py` |
+| Datasets | `data/` — `waterbirds`, `cub`, `metashift`, `synthetic` |
+| Backbones | `backbones/` — `clip` (OpenCLIP), `dinov2`, `resnet`, `inception` (Inception-v3), `toy` |
+| Pipeline builder | `pipeline.py` (+ `registry.py`, `context.py`) |
+| Stage modules | `stages/` — one ABC per stage in `stages/base.py` |
+| Trained CBM | `model.py` — weights + cached concept scores, saved to `runs/<run_id>-s<seed>/` |
+| Evaluation suite | `evaluation/` — `shift`, `concepts`, `leakage`, `localization`, `keypoint_distance`, `part_iou`, `faithfulness` |
+| Results store | `results.py` — JSONL, one row per (run_id, seed) |
+| Analysis | `analysis.py` — seed aggregation, effects models, Pareto frontiers, effective robustness |
+
+### Stages
+
+| Stage | Variants | Interface |
+|---|---|---|
+| Discovery | `llm`, `vlm`, `kb`, `sae`, `dataset`, `static` | `discover(ctx) -> ConceptSet` |
+| Filtering (chained) | `rules`, `clip`, `dino`, `select` | `filter(concepts, ctx) -> ConceptSet` |
+| Generation | `scores`, `logits`, `embeddings` (CEM), `boc` | `build(in_dim, aligned) -> ConceptLayer` |
+| Alignment | `clip`, `weights`, `dino`, `human`, `segment_clip` (instance bags) | `fit(concepts, ctx) -> AlignedConcepts` |
+| Predictor | `sparse`, `dense`, `residual`, `mil` (instance bags) | `build(rep_dim, n_classes, feat_dim) -> PredictorHead` |
+| Training | `independent`, `sequential`, `joint` (+ `*_weighted`: imbalance-weighted concept BCE) | `fit(layer, head, aligned, ctx) -> log` |
+
+How the stages divide the work:
+
+- **Alignment** decides how concept neurons get their meaning. `clip` uses continuous pseudo-labels
+  (teacher image–text similarity, as in Label-free CBM); `dino` uses binary pseudo-labels from an
+  open-vocabulary detector; `human` uses dataset annotations; `weights` fixes each neuron to the
+  concept's text embedding (or SAE direction) with no targets.
+- **Generation** decides what the predictor sees: the concept score (`scores`: probabilities for
+  binary concepts; `logits`: their logits, as Koh et al. connect f), a CEM-style embedding mixed by
+  concept probability, or a hard 0/1 bit (straight-through in joint training).
+- **Training** fits on cached frozen features by default. With `finetune: {epochs, lr, optimizer,
+  momentum, weight_decay, lr_step, lr_gamma, batch_size, patience, augment, num_workers}` it also
+  trains the backbone end to end (backbones with `trainable = True`: `inception`, `toy`): images go
+  through a trainable copy of the encoder, optimized with the concept layer (x → c phase of
+  `independent`/`sequential`) or with layer and head (`joint`). Afterwards the run's inputs, and so
+  every evaluator, use the fine-tuned encoder's features; it is saved as `runs/<run>/encoder.pt`.
+  Not combinable with `instances:` or patch-reading evaluators (`localization`, `keypoint_distance`,
+  `part_iou`).
+- Non-CLIP backbones need a text-capable `teacher:` for `clip` alignment and the `clip`/`select`
+  filters (see `configs/ablations/waterbirds_backbones.yaml`).

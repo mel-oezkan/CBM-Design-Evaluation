@@ -106,6 +106,10 @@ def render() -> str:
     if missing:
         raise KeyError(f"Add {sorted(missing)} to SECTIONS in {Path(__file__).name}")
     lines = [
+        "---",
+        "toc_collapse: 1",  # sections start collapsed in the TOC (docs/javascripts/toc-collapse.js)
+        "---",
+        "",
         "# Component catalogue",
         "",
         "Every registered component, generated from the registries at build time (the same data as",

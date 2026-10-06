@@ -1,3 +1,7 @@
+---
+toc_collapse: 2
+---
+
 # Core
 
 ::: cbm_eval.config

@@ -140,8 +140,8 @@ uv run cbm-eval sweep configs/ablations/synthetic_stages.yaml
 ```
 
 The skipped run is the anchor with seed 0, which already ran above. An interrupted sweep can be
-restarted with the same command; finished runs are skipped. [Configs and sweeps](configs.md)
-covers grid mode, overrides and how factor values replace keys.
+restarted with the same command; finished runs are skipped. [Designing an experiment](experiments.md)
+has more sweep designs, and the [config reference](configs.md) covers how factor values replace keys.
 
 ## Analyze the results
 
@@ -207,7 +207,8 @@ Training runs on the CPU unless the training stage sets `device` (e.g. `device: 
 
 ## Next steps
 
-- [Architecture](architecture.md): how a config becomes a trained CBM, and what each stage hands
-  to the next.
-- [Configs and sweeps](configs.md): writing your own anchors and ablations.
+- [How a run works](how-it-works.md): what each stage does in the run you just trained, and
+  [how training works](training.md) in detail.
+- [Designing an experiment](experiments.md): writing your own anchors and ablations, and adding
+  a paper's method.
 - [Contributing](contributing.md): adding a new discovery method, loss, predictor or evaluator.

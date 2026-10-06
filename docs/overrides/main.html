@@ -1,6 +1,12 @@
 {#- Section name ("Architecture", "Experiments", ...) as a small eyebrow above the page title. -#}
 {% extends "base.html" %}
 
+{#- Pages with ``toc_collapse: <depth>`` front matter get a collapsible TOC (javascripts/toc-collapse.js). -#}
+{% block extrahead %}
+  {{ super() }}
+  {% if page.meta and page.meta.toc_collapse %}<meta name="cbm-toc-collapse" content="{{ page.meta.toc_collapse }}">{% endif %}
+{% endblock %}
+
 {% block content %}
   {% if page.parent %}<div class="cbm-eyebrow">{{ page.parent.title }}</div>{% endif %}
   {{ super() }}
