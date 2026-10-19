@@ -128,6 +128,8 @@ How the stages divide the work:
   `independent`/`sequential`) or with layer and head (`joint`). Afterwards the run's inputs, and so
   every evaluator, use the fine-tuned encoder's features; it is saved as `runs/<run>/encoder.pt`.
   Not combinable with `instances:` or patch-reading evaluators (`localization`, `keypoint_distance`,
-  `part_iou`).
+  `part_iou`). With `aux: {weight, init_std}` it adds Koh et al.'s auxiliary concept head on the
+  backbone's auxiliary tap (`Backbone.aux_dim`: Inception's `AuxLogits` on `Mixed_6e`). The head is
+  trained only during `fit`, and in `joint` training its concepts also pass through the head.
 - Non-CLIP backbones need a text-capable `teacher:` for `clip` alignment and the `clip`/`select`
   filters (see `configs/ablations/waterbirds_backbones.yaml`).

@@ -201,9 +201,12 @@ class Training(ABC):
     backbone's image encoder, see ``Backbone.encoder``) and the stage fits it end to end on images
     from ``ctx.image_split``; afterwards the run's inputs are that encoder's features.
     ``num_workers`` is the dataloader width for those images.
+    ``needs_aux``: when True, the stage reads the backbone's auxiliary tap (``Backbone.aux_dim``,
+    ``ctx.aux_features``) and ``encoder`` carries it (``Backbone.encoder(aux=True)``).
     """
 
     trains_backbone: bool = False
+    needs_aux: bool = False
     num_workers: int = 0
 
     @abstractmethod

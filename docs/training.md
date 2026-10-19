@@ -141,6 +141,7 @@ These keys apply to every scheme:
 | `concept_loss` | `auto` | see [Losses](#losses) |
 | `device` | `cpu` | `auto` uses a GPU when there is one |
 | `finetune` | none | train the backbone too; see below |
+| `aux` | none | Koh et al.'s auxiliary concept head; see below |
 | `concept_weight` | 1.0 | `joint` only: weight of the concept loss |
 
 Change them in the config, never in the code: `{name: joint, concept_weight: 0.1, epochs: 100}`.
@@ -172,6 +173,32 @@ features, and the encoder is saved to `runs/<run>/encoder.pt`.
 Only backbones that support it (`inception`, `toy`) can be fine-tuned. It can't be combined with
 `instances:` or with evaluators that read patch features (`localization`, `keypoint_distance`,
 `part_iou`). See `configs/anchors/cub_koh2020.yaml` for a full example.
+
+## Auxiliary concept head
+
+With `aux: {weight: 0.4, init_std: 0.001}`, training adds Koh et al.'s auxiliary Inception head
+(their `-use_aux`). A second concept layer reads the backbone's auxiliary tap: for `inception`, the
+pooled 768-d output of the `AuxLogits` convolutions on `Mixed_6e`. On every training step, the loss
+on its concept logits is added, multiplied by `weight`. It is the same loss as the main branch's:
+
+- `independent` / `sequential`: the concept loss of step 1.
+- `joint`: the concept loss, plus the task loss of the auxiliary concepts passed through the same
+  head. So the head also learns from them.
+
+Validation and model selection use the main branch only. The auxiliary layer is discarded after
+training, so evaluation never sees it. Its weights start from a normal distribution truncated at
+±2 `init_std` (`null`: PyTorch's default init).
+
+What it changes depends on the backbone:
+
+| | frozen backbone | `finetune:` |
+|---|---|---|
+| `independent` / `sequential` | nothing, so the stage refuses it | trains the encoder up to `Mixed_6e` |
+| `joint` | trains the head on the auxiliary concepts | both |
+
+It needs a backbone with an auxiliary tap (`inception`, or `toy` with `aux_dim`) and concept
+targets. It can't be combined with `instances:`. In `joint` training, it needs a generation and
+head that read only concepts (not `embeddings` or `residual`).
 
 ## Changing the training
 

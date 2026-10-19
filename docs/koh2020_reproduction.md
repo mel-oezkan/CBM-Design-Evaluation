@@ -39,6 +39,7 @@ Each anchor's header comment lists what matches the paper and what does not.
 | Inception-v3 (ImageNet), fine-tuned end to end with SGD and augmentation | `backbone: inception` + `training.finetune: {optimizer: sgd, lr, momentum: 0.9, weight_decay, batch_size: 64}` |
 | x → c: lr 0.01, weight decay 4e-5 | independent and sequential anchors |
 | Joint: lr 0.001, weight decay 4e-4, loss divided by 1 + λ·112 | joint anchor: lr 0.00047 (= 0.001 / 2.12, since our loss is not divided) |
+| Auxiliary Inception head (`-use_aux`): + 0.4 × every loss term on `AuxLogits`; in joint, its concepts also go through f | `training.aux: {weight: 0.4, init_std: 0.001}` (all three anchors) |
 | Concepts = annotated attributes | `discovery: dataset`, `filtering: [{name: rules, max_words: 10, remove_class_names: false}]` (keeps all 112) |
 | Concept supervision | `alignment: human` |
 | Linear c → y | `predictor: dense` |
@@ -56,9 +57,9 @@ Each anchor's header comment lists what matches the paper and what does not.
 - **Optimizers:** the concept layer and head use Adam; the paper uses SGD throughout. The encoder
   uses SGD as in the paper. `stages.training.optimizer: sgd` (with `momentum`, `weight_decay`)
   expresses the paper's choice; the anchors don't set it yet, so their run ids and results stay as they are.
-- **Inputs:** no auxiliary Inception head (the paper adds 0.4 × the auxiliary loss); ImageNet
-  normalization instead of mean 0.5 / std 2; evaluation images are resized to 299 rather than
-  center-cropped.
+- **Inputs:** ImageNet normalization instead of mean 0.5 / std 2; evaluation images are resized
+  to 299 rather than center-cropped. The auxiliary concept head reads standardized features; the
+  paper's reads them raw.
 - **Interventions:** the `leakage` evaluator replaces random single concepts, not the paper's
   visibility-aware concept groups. With `generation: logits`, an intervened 0/1 value becomes a
   saturated logit (±13.8) rather than the 5th/95th-percentile logits the paper uses.
@@ -102,7 +103,9 @@ uv run modal run scripts/koh2020_modal.py::fetch        # merge results into res
 ## Ablations
 
 The ablations run with a frozen backbone (`overrides: {stages.training.finetune: null}`) and
-remove one Koh-specific option at a time, so each one measures how much that option matters:
+remove one Koh-specific option at a time, so each one measures how much that option matters.
+The independent and sequential ablations also drop `aux`, because on a frozen backbone it can't
+change those models:
 
 | Factor | Alternative |
 |---|---|
@@ -110,6 +113,7 @@ remove one Koh-specific option at a time, so each one measures how much that opt
 | `dataset.split_dir` | `null`: the pipeline's own train/val split |
 | `stages.generation` | `scores`: probabilities instead of logits into the head (sequential, joint) |
 | `stages.training.name` | the unweighted training variant |
+| `stages.training.aux` | `null`: no auxiliary head (joint only) |
 
 ## Notes
 

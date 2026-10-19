@@ -57,6 +57,9 @@ class PipelineBuilder:
         if self.instances is not None and not self.predictor.supports_bags:
             raise ValueError(f"`instances: {cfg.instances['name']}` gives each image a bag of instances; "
                              f"use a bag-aware predictor such as {{name: mil}}, not '{st['predictor']['name']}'")
+        if self.training.needs_aux and self.instances is not None:
+            raise ValueError("`stages.training.aux` trains on image-level features of the backbone's auxiliary tap; "
+                             "remove `instances:` or `aux:`")
         if self.training.trains_backbone:
             patchy = [n for n, e in self.evaluators.items() if e.needs_patches]
             if self.instances is not None or patchy:
@@ -130,12 +133,15 @@ class PipelineBuilder:
         aligned = self.alignment.fit(concepts, ctx)
         layer = self.generation.build(ctx.feat_dim, aligned)
         head = self.predictor.build(layer.rep_dim, ctx.num_classes, ctx.feat_dim)
+        if self.training.needs_aux and ctx.backbone.aux_dim is None:
+            raise ValueError(f"`stages.training.aux` needs a backbone with an auxiliary feature tap; "
+                             f"'{self.cfg.backbone['name']}' has none (use e.g. inception)")
         encoder = None
         if self.training.trains_backbone:
             if not ctx.backbone.trainable:
                 raise ValueError(f"`stages.training.finetune` needs a trainable backbone; "
                                  f"'{self.cfg.backbone['name']}' is frozen-only (use e.g. inception)")
-            encoder = ctx.backbone.encoder()
+            encoder = ctx.backbone.encoder(aux=self.training.needs_aux)
             train_log = self.training.fit(layer, head, aligned, ctx, encoder=encoder)
             ctx.use_encoder(encoder.eval(), num_workers=self.training.num_workers)  # inputs = fine-tuned features
         else:
@@ -164,7 +170,7 @@ class PipelineBuilder:
         model.load_state_dict(torch.load(run_dir / "model.pt", map_location="cpu"))
         encoder = None
         if (run_dir / "encoder.pt").exists():
-            encoder = ctx.backbone.encoder()
+            encoder = ctx.backbone.encoder(aux=self.training.needs_aux)  # the state dict holds the tap it trained
             encoder.load_state_dict(torch.load(run_dir / "encoder.pt", map_location="cpu"))
             ctx.use_encoder(encoder.to(ctx.device).eval(), num_workers=self.training.num_workers)
         cbm = TrainedCBM(model.eval(), aligned, self.cfg.to_dict(), json.loads((run_dir / "train_log.json").read_text()),
