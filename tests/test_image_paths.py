@@ -49,7 +49,7 @@ def _cfg(tmp_path, root, **stages):
 def test_waterbirds_resnet_end_to_end(tmp_path, waterbirds_root):
     res = run(_cfg(tmp_path, waterbirds_root), save=False)
     assert 0 <= res.metrics["shift.test.wga"] <= 1
-    # second run hits the feature cache
+    # features are cached on disk
     assert list((tmp_path / "cache" / "features" / "waterbirds").glob("*.pt"))
 
 

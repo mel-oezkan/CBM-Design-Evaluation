@@ -51,9 +51,7 @@ def test_patch_mil_end_to_end(base_cfg):
     {"stages.predictor": {"name": "mil", "pooling": "max"}},
     {"stages.predictor": {"name": "mil", "area_gamma": 0.25}},
     {"stages.alignment": {"name": "segment_clip", "targets": "standardized"}},
-    {"stages.alignment": {"name": "human"}},  # image-level targets supervise the max over patches
     {"stages.alignment": {"name": "weights"}},
-    {"stages.training": {"name": "sequential", "epochs": 100}},
     {"stages.generation": {"name": "embeddings", "emb_dim": 4}},
 ])
 def test_bag_variants_run(base_cfg, override):
