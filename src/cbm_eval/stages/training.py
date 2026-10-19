@@ -11,6 +11,14 @@ The predictor of independent / sequential is then fitted on the fine-tuned encod
 With ``aux: {...}`` a variant also trains Koh et al.'s auxiliary concept head on the backbone's
 auxiliary tap (``Backbone.aux_dim``): every training step adds ``aux.weight`` x the step's loss on that
 head (see ``Aux``). On a frozen backbone this only changes a joint model, through the shared head.
+
+With ``augment: {...}`` the backbone stays frozen but the phases that read features (x -> c, joint)
+see augmented images: each step reads one of ``views`` cached augmented copies of every image.
+
+Every phase keeps the weights of its best epoch by ``select`` (``concept_select`` for the x -> c
+phase): the lowest validation loss (default), the highest validation accuracy, or the highest
+running training accuracy, which ``train_on_val`` (``concept_train_on_val``) needs because it also
+trains on the validation split (Koh et al. retrain on train + val this way).
 """
 
 from __future__ import annotations
@@ -31,6 +39,7 @@ from ..utils import resolve_device
 from .base import AlignedConcepts, ConceptLayer, PredictorHead, Training
 
 CONCEPT_LOSSES = ("auto", "mse", "bce", "cosine")
+SELECTIONS = ("val_loss", "val_acc", "train_acc")
 
 
 def concept_loss(layer: ConceptLayer, x: torch.Tensor, targets: torch.Tensor, bag: Bag | None = None,
@@ -63,6 +72,16 @@ def concept_loss_from_logits(logits: torch.Tensor, targets: torch.Tensor, bag: B
     return bag.mean(per) if bag is not None else per.mean()
 
 
+def concept_accuracy(logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+    """Fraction of (image, concept) pairs where ``logit >= 0`` (``sigmoid >= 0.5``) matches a binary
+    (N, K) target: Koh et al.'s concept accuracy."""
+    return ((logits >= 0) == (targets > 0.5)).float().mean()
+
+
+def class_accuracy(logits: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    return (logits.argmax(-1) == y).float().mean()
+
+
 @dataclass
 class Batch:
     """Inputs, labels, concept targets and (for instance bags) the bag, indexed together.
@@ -70,7 +89,8 @@ class Batch:
     On frozen features, work that cannot change during a phase is done once over the whole split:
     ``xn`` holds ``x`` normalized by the concept layer, ``c`` a frozen layer's concept predictions.
     ``x`` (and ``xn``) are None once neither the concept layer nor the head reads them.
-    ``xa`` (N, D_aux) are auxiliary-tap features (training ``aux:``); only training batches carry them.
+    ``xa`` (N, D_aux) are auxiliary-tap features (training ``aux:``); only batches that are trained on carry them.
+    ``views`` (N, V, D) are augmented copies of ``x`` (training ``augment:``); ``view`` picks one per image.
     """
 
     x: torch.Tensor | None
@@ -80,6 +100,7 @@ class Batch:
     xn: torch.Tensor | None = None
     c: torch.Tensor | None = None
     xa: torch.Tensor | None = None
+    views: torch.Tensor | None = None
 
     def __len__(self) -> int:
         return len(self.y)
@@ -94,6 +115,15 @@ class Batch:
     def to(self, device) -> "Batch":
         return self._map(lambda v: v.to(device))
 
+    @staticmethod
+    def cat(a: "Batch", b: "Batch") -> "Batch":
+        """Two splits as one, e.g. train + val when training on both."""
+        if a.bag is not None or b.bag is not None:
+            raise ValueError("`train_on_val` does not support instance bags; remove `instances:` or set "
+                             "`stages.training.train_on_val` / `concept_train_on_val` to false")
+        return Batch(**{f.name: None if (u := getattr(a, f.name)) is None else torch.cat([u, getattr(b, f.name)])
+                        for f in dataclasses.fields(a)})
+
     def normalized(self, layer: ConceptLayer) -> torch.Tensor:
         """The features through ``layer.normalize``: ``xn`` if precomputed, else computed now."""
         return self.xn if self.xn is not None else layer.normalize(self.x)
@@ -107,8 +137,16 @@ class Batch:
                 self.bag.on_rows(layer.logits_from_normalized, xn)
         return layer.logits_from_normalized(self.normalized(layer) if xn is None else xn)
 
+    def view(self, layer: ConceptLayer, g: torch.Generator) -> "Batch":
+        """One augmented view per image, drawn with ``g``, as ``x`` (and ``xn``); ``self`` without views."""
+        if self.views is None:
+            return self
+        pick = torch.randint(self.views.shape[1], (len(self),), generator=g).to(self.views.device)
+        x = self.views[torch.arange(len(self), device=self.views.device), pick].float()
+        return dataclasses.replace(self, x=x, xn=layer.normalize(x), views=None)
+
     def without_x(self) -> "Batch":
-        return dataclasses.replace(self, x=None, xn=None, xa=None)
+        return dataclasses.replace(self, x=None, xn=None, xa=None, views=None)
 
 
 OPTIMIZERS = ("adam", "sgd")
@@ -130,6 +168,8 @@ class OptimizerSpec:
 
 
 ParamGroup = tuple[list[nn.Parameter], OptimizerSpec]
+# A minibatch's (loss, accuracy); the accuracy is None unless model selection reads it.
+Step = tuple[torch.Tensor, torch.Tensor | None]
 
 
 def _optimizers(groups: list[ParamGroup]) -> list[torch.optim.Optimizer]:
@@ -141,21 +181,70 @@ def _optimizers(groups: list[ParamGroup]) -> list[torch.optim.Optimizer]:
     return opts
 
 
+class _Selection:
+    """Model selection over epochs: keeps the weights of the best epoch by ``select`` and asks to stop
+    after ``patience`` epochs without improvement. ``val_loss`` improves by more than 1e-5; the
+    accuracies improve when strictly higher (as Koh et al.'s ``best_val_acc < acc``)."""
+
+    def __init__(self, select: str, patience: int, modules: list[nn.Module], to_cpu: bool = False):
+        self.select, self.patience, self.modules, self.to_cpu = select, patience, modules, to_cpu
+        self.best = float("inf") if select == "val_loss" else float("-inf")
+        self.state, self.bad, self.best_epoch, self.val_loss = None, 0, 0, float("nan")
+
+    def update(self, epoch: int, train_acc: float | None, val: tuple[float, float | None] | None) -> bool:
+        """Record an epoch's running training accuracy and (validation loss, accuracy); True to stop."""
+        val_loss, val_acc = val if val is not None else (float("nan"), None)
+        if self.select == "val_loss":
+            score, better = val_loss, val_loss < self.best - 1e-5
+        else:
+            score = train_acc if self.select == "train_acc" else val_acc
+            better = score > self.best
+        if better:
+            self.best, self.bad, self.best_epoch, self.val_loss = score, 0, epoch, val_loss
+            self.state = [{k: t.detach().cpu().clone() for k, t in m.state_dict().items()} if self.to_cpu
+                          else copy.deepcopy(m.state_dict()) for m in self.modules]
+            return False
+        self.bad += 1
+        return self.bad >= self.patience
+
+    def finish(self, epoch: int) -> dict[str, float]:
+        """Restore the best weights; the log of the phase."""
+        if self.state is not None:
+            for m, s in zip(self.modules, self.state):
+                m.load_state_dict(s)
+        out = {"epochs": epoch, "val_loss": self.best if self.select == "val_loss" else self.val_loss,
+               "best_epoch": self.best_epoch}
+        return out if self.select == "val_loss" else out | {self.select: self.best}
+
+
+def _acc_flags(select: str) -> tuple[bool, bool]:
+    """Whether training / validation steps must report an accuracy under ``select``."""
+    return select == "train_acc", select == "val_acc"
+
+
 def optimize(groups: list[ParamGroup], modules: list[nn.Module], n: int,
-             train_loss: Callable[[torch.Tensor], torch.Tensor], val_loss: Callable[[], float],
+             train_step: Callable[[torch.Tensor], Step], val_step: Callable[[], Step] | None,
              epochs: int, batch_size: int, patience: int, seed: int,
-             after_step: Callable[[], None] | None = None) -> dict[str, float]:
-    """Minibatch training with early stopping on ``val_loss``; restores the best weights."""
+             after_step: Callable[[], None] | None = None, select: str = "val_loss",
+             drop_last: bool = False) -> dict[str, float]:
+    """Minibatch training over ``n`` examples (``train_step(idx)``), with model selection by ``select``
+    (``val_step()`` on the validation split; None when it is trained on too); restores the best
+    weights. ``drop_last`` skips each epoch's last, incomplete minibatch."""
     opts = _optimizers(groups)
     if not opts:
-        return {"epochs": 0, "val_loss": val_loss()}
+        return {"epochs": 0, "val_loss": float(val_step()[0]) if val_step is not None else float("nan")}
     g = torch.Generator().manual_seed(seed)
-    best, best_state, bad, epoch = float("inf"), None, 0, 0
+    sel = _Selection(select, patience, modules)
+    epoch = 0
     for epoch in range(1, epochs + 1):
         for m in modules:
             m.train()
-        for idx in torch.randperm(n, generator=g).split(batch_size):
-            loss = train_loss(idx)
+        batches = torch.randperm(n, generator=g).split(batch_size)
+        if drop_last and len(batches) > 1 and len(batches[-1]) < batch_size:
+            batches = batches[:-1]
+        correct, seen = 0.0, 0
+        for idx in batches:
+            loss, acc = train_step(idx)
             for opt in opts:
                 opt.zero_grad()
             loss.backward()
@@ -163,21 +252,15 @@ def optimize(groups: list[ParamGroup], modules: list[nn.Module], n: int,
                 opt.step()
             if after_step is not None:
                 after_step()
+            if acc is not None:
+                correct, seen = correct + float(acc) * len(idx), seen + len(idx)
         for m in modules:
             m.eval()
         with torch.no_grad():
-            v = val_loss()
-        if v < best - 1e-5:
-            best, bad = v, 0
-            best_state = [copy.deepcopy(m.state_dict()) for m in modules]
-        else:
-            bad += 1
-            if bad >= patience:
-                break
-    if best_state is not None:
-        for m, s in zip(modules, best_state):
-            m.load_state_dict(s)
-    return {"epochs": epoch, "val_loss": best}
+            val = None if val_step is None else tuple(None if v is None else float(v) for v in val_step())
+        if sel.update(epoch, correct / seen if seen else None, val):
+            break
+    return sel.finish(epoch)
 
 
 @dataclass(frozen=True)
@@ -187,8 +270,8 @@ class Finetune:
     The encoder gets its own optimizer (``sgd`` with ``momentum``, or ``adam``; both with
     ``weight_decay``) at ``lr``, decayed by ``lr_gamma`` every ``lr_step`` epochs if set; the concept
     layer and head keep the stage's optimizers. Batches of ``batch_size`` training images, augmented
-    with the backbone's ``train_transform`` if ``augment``. Early stopping on the validation loss
-    with ``patience``, restoring the best encoder, layer and head.
+    with the backbone's ``train_transform`` if ``augment``. Early stopping with ``patience`` by the
+    stage's ``select`` / ``concept_select``, restoring the best encoder, layer and head.
     """
 
     epochs: int = 100
@@ -255,6 +338,27 @@ def _params(module: nn.Module | None) -> list[nn.Parameter]:
     return [] if module is None else list(module.parameters())
 
 
+@dataclass(frozen=True)
+class Augment:
+    """Augmentation on a frozen backbone (a training stage's ``augment:``).
+
+    ``views`` augmented copies of every training image (the backbone's ``train_transform``) are
+    encoded once by the frozen backbone and cached (``Context.augmented``); every step of the x -> c
+    and joint phases reads one of them per image, drawn at random. This is a finite stand-in for
+    augmenting afresh every epoch, as fine-tuning does. ``seed`` fixes the views, so every run with
+    the same backbone shares them; ``batch_size`` and ``num_workers`` only batch the encoding.
+    """
+
+    views: int = 32
+    seed: int = 0
+    batch_size: int = 128
+    num_workers: int = 4
+
+    def __post_init__(self):
+        if self.views < 1:
+            raise ValueError("`stages.training.augment.views` must be at least 1")
+
+
 class _ImageFeed:
     """Train / val images encoded on the fly by the trainable encoder, as ``Batch``es of features."""
 
@@ -299,22 +403,24 @@ class _ImageFeed:
 
 
 def optimize_images(groups: list[ParamGroup], modules: list[nn.Module], feed: _ImageFeed,
-                    train_loss: Callable[[Batch], torch.Tensor], val_loss: Callable[[Batch], torch.Tensor],
-                    after_step: Callable[[], None] | None = None) -> dict[str, float]:
+                    train_step: Callable[[Batch], Step], val_step: Callable[[Batch], Step],
+                    after_step: Callable[[], None] | None = None, select: str = "val_loss") -> dict[str, float]:
     """``optimize`` over image batches, with the encoder fine-tuned alongside ``modules``."""
     spec, encoder = feed.spec, feed.encoder
     opts = _optimizers(groups)
     enc_opt = spec.make_optimizer([p for p in encoder.parameters() if p.requires_grad])
     modules = [encoder] + modules
-    best, best_state, bad, epoch = float("inf"), None, 0, 0
+    sel = _Selection(select, spec.patience, modules, to_cpu=True)
+    epoch = 0
     for epoch in range(1, spec.epochs + 1):
         if spec.lr_step:
             for g in enc_opt.param_groups:
                 g["lr"] = spec.lr * spec.lr_gamma ** ((epoch - 1) // spec.lr_step)
         for m in modules:
             m.train()
+        correct, seen = 0.0, 0
         for b in feed.batches("train"):
-            loss = train_loss(b)
+            loss, acc = train_step(b)
             for opt in opts + [enc_opt]:
                 opt.zero_grad()
             loss.backward()
@@ -322,57 +428,87 @@ def optimize_images(groups: list[ParamGroup], modules: list[nn.Module], feed: _I
                 opt.step()
             if after_step is not None:
                 after_step()
+            if acc is not None:
+                correct, seen = correct + float(acc) * len(b), seen + len(b)
         for m in modules:
             m.eval()
         with torch.no_grad():
-            total, n = 0.0, 0
+            total, hits, n = 0.0, 0.0, 0
             for b in feed.batches("val"):
-                total, n = total + float(val_loss(b)) * len(b), n + len(b)
-            v = total / max(n, 1)
-        if v < best - 1e-5:
-            best, bad = v, 0
-            best_state = [{k: t.detach().cpu().clone() for k, t in m.state_dict().items()} for m in modules]
-        else:
-            bad += 1
-            if bad >= spec.patience:
-                break
-    if best_state is not None:
-        for m, s in zip(modules, best_state):
-            m.load_state_dict(s)
+                loss, acc = val_step(b)
+                total, n = total + float(loss) * len(b), n + len(b)
+                hits += 0.0 if acc is None else float(acc) * len(b)
+            val = (total / max(n, 1), hits / max(n, 1) if select == "val_acc" else None)
+        if sel.update(epoch, correct / seen if seen else None, val):
+            break
+    log = sel.finish(epoch)
     for m in modules:
         m.eval()
-    return {"epochs": epoch, "val_loss": best}
+    return log
 
 
 class _Base(Training):
     """Shared by every variant. ``optimizer`` (``adam``, or ``sgd`` with ``momentum``; both with
     ``weight_decay``) at ``lr`` fits the concept layer and every head that does not bring its own
-    (``PredictorHead.optimizer``, e.g. the sparse head's plain SGD). ``aux: {weight, init_std}`` adds
-    Koh et al.'s auxiliary concept head (see ``Aux``); it needs ``finetune:`` unless the variant passes
-    the auxiliary concepts through the head (``aux_reaches_head``, joint)."""
+    (``PredictorHead.optimizer``, e.g. the sparse head's plain SGD).
+
+    The x -> c phase of independent / sequential training may differ from the head's: ``concept_lr``,
+    ``concept_weight_decay``, ``concept_epochs``, ``concept_select`` and ``concept_train_on_val``
+    (each None: the stage-wide setting). ``select`` is ``val_loss``, ``val_acc`` (task accuracy for
+    heads and joint, concept accuracy for x -> c) or ``train_acc`` (the running accuracy over an
+    epoch's minibatches); ``train_on_val`` trains on train + val and needs ``train_acc``.
+    ``drop_last`` skips each epoch's last incomplete minibatch. ``augment: {views, ...}`` trains the
+    x -> c and joint phases on augmented views of the images (see ``Augment``). ``aux: {weight,
+    init_std}`` adds Koh et al.'s auxiliary concept head (see ``Aux``); it needs ``finetune:`` unless
+    the variant passes the auxiliary concepts through the head (``aux_reaches_head``, joint).
+    """
 
     aux_reaches_head: bool = False  # True if the auxiliary concepts also train the head (joint)
 
     def __init__(self, epochs: int = 200, concept_epochs: int | None = None, batch_size: int = 256,
                  lr: float = 1e-3, patience: int = 10, concept_loss: str = "auto", device: str = "cpu",
                  finetune: dict | None = None, optimizer: str = "adam", momentum: float = 0.0,
-                 weight_decay: float = 0.0, aux: dict | None = None):
+                 weight_decay: float = 0.0, concept_lr: float | None = None,
+                 concept_weight_decay: float | None = None, select: str = "val_loss",
+                 concept_select: str | None = None, train_on_val: bool = False,
+                 concept_train_on_val: bool | None = None, drop_last: bool = False, augment: dict | None = None,
+                 aux: dict | None = None):
         if concept_loss not in CONCEPT_LOSSES:
             raise ValueError(f"Unknown concept loss '{concept_loss}' (use one of {CONCEPT_LOSSES})")
         if optimizer not in OPTIMIZERS:
             raise ValueError(f"Unknown optimizer '{optimizer}' in `stages.training.optimizer` (use one of {OPTIMIZERS})")
         if momentum and optimizer != "sgd":  # would change the run_id without changing the run
             raise ValueError("`stages.training.momentum` needs `stages.training.optimizer: sgd`")
+        for key, value in (("select", select), ("concept_select", concept_select or select)):
+            if value not in SELECTIONS:
+                raise ValueError(f"Unknown `stages.training.{key}` '{value}' (use one of {SELECTIONS})")
         self.epochs, self.concept_epochs = epochs, concept_epochs or epochs
         self.batch_size, self.lr, self.patience = batch_size, lr, patience
         self.optimizer, self.momentum, self.weight_decay = optimizer, momentum, weight_decay
+        self.concept_lr, self.concept_weight_decay = concept_lr, concept_weight_decay
+        self.select, self.concept_select = select, concept_select or select
+        self.train_on_val = train_on_val
+        self.concept_train_on_val = train_on_val if concept_train_on_val is None else concept_train_on_val
+        self.drop_last = drop_last
         self.concept_loss, self.device = concept_loss, device
         self.finetune = Finetune(**finetune) if finetune else None  # unknown keys raise TypeError
+        self.augment = Augment(**augment) if augment else None
         self.aux = Aux(**aux) if aux is not None else None  # `aux: {}` means the defaults, not "off"
         if self.aux is not None and self.finetune is None and not self.aux_reaches_head:
             raise ValueError(f"`stages.training.aux` would only train a discarded auxiliary concept layer: on a frozen "
                              f"backbone '{type(self).__name__}' training is unchanged by it. Add `finetune:` or "
                              "remove `aux:`")
+        if self.aux is not None and self.augment is not None:
+            raise ValueError("`stages.training.aux` reads the auxiliary tap of the clean images, but `augment:` trains "
+                             "on augmented views of them; remove `aux:` or `augment:`")
+        for key, on_val, sel in (("train_on_val", self.train_on_val, self.select),
+                                 ("concept_train_on_val", self.concept_train_on_val, self.concept_select)):
+            if on_val and sel != "train_acc":
+                raise ValueError(f"`stages.training.{key}` leaves no validation split to select on; set "
+                                 f"`stages.training.{key.replace('train_on_val', 'select')}: train_acc`")
+        if self.finetune is not None and (self.augment is not None or self.train_on_val or self.concept_train_on_val):
+            raise ValueError("`stages.training.finetune` augments images itself and selects on the validation "
+                             "split; remove `augment:` / `train_on_val` / `concept_train_on_val`, or `finetune:`")
 
     @property
     def trains_backbone(self) -> bool:
@@ -386,6 +522,17 @@ class _Base(Training):
     def num_workers(self) -> int:
         return self.finetune.num_workers if self.finetune else 0
 
+    @property
+    def _val_views(self) -> bool:
+        """Whether a phase reads augmented views of the validation images (it trains on them)."""
+        return self.train_on_val or self.concept_train_on_val
+
+    def _views(self, ctx, split: str) -> torch.Tensor | None:
+        a = self.augment
+        if a is None or (split == "val" and not self._val_views):
+            return None
+        return ctx.augmented(split, a.views, a.seed, a.batch_size, a.num_workers)
+
     def fit(self, layer, head, aligned, ctx, encoder=None):
         device = resolve_device(self.device)
         if self.aux is not None and not aligned.has_targets:
@@ -395,10 +542,15 @@ class _Base(Training):
             raise ValueError("`stages.training.aux` passes the auxiliary concepts through the head alone, so it "
                              "needs a generation and predictor that read only concepts (e.g. `generation: logits`, "
                              "`predictor: dense`); remove `aux:` for this combination")
-        tr = _batch(ctx, aligned, "train", aux=self.aux is not None).to(device)
-        va = _batch(ctx, aligned, "val").to(device)
+        aux = self.aux is not None
+        tr = _batch(ctx, aligned, "train", aux=aux)
+        va = _batch(ctx, aligned, "val", aux=aux and (self.train_on_val or self.concept_train_on_val))
+        if self.augment is not None and tr.bag is not None:
+            raise ValueError("`stages.training.augment` augments whole images and does not support instance bags; "
+                             "remove `instances:` or `augment:`")
+        tr, va = (dataclasses.replace(b, views=self._views(ctx, s)).to(device) for b, s in ((tr, "train"), (va, "val")))
         aux_head = None
-        if self.aux is not None:
+        if aux:
             if tr.bag is not None:
                 raise ValueError("`stages.training.aux` does not support instance bags; remove `instances:` or `aux:`")
             # built here, after the layer and head, so that runs without `aux:` draw the same random numbers
@@ -451,7 +603,7 @@ class _Base(Training):
 
     def _aux_term(self, aux_head: _AuxHead | None, layer: ConceptLayer, head: PredictorHead | None,
                   b: Batch) -> torch.Tensor | float:
-        """``aux.weight`` x ``_aux_loss`` on batches that carry auxiliary features (training batches); else 0."""
+        """``aux.weight`` x ``_aux_loss`` of a training batch; 0 for a batch without auxiliary features."""
         if aux_head is None or b.xa is None:
             return 0.0
         return self.aux.weight * self._aux_loss(aux_head, layer, head, b)
@@ -463,26 +615,41 @@ class _Base(Training):
 
     def _fit_concepts(self, layer, aligned, tr: Batch, va: Batch, seed, feed: _ImageFeed | None = None,
                       aux_head: _AuxHead | None = None) -> dict[str, float]:
-        group = (layer.concept_params() + _params(aux_head), self._optimizer())
+        train_acc, val_acc = _acc_flags(self.concept_select)
+        if (train_acc or val_acc) and aligned.has_targets and (aligned.target_type != "binary" or tr.bag is not None):
+            raise ValueError(f"`stages.training.concept_select: {self.concept_select}` measures the accuracy of binary "
+                             "image-level concept predictions; use `val_loss` for this alignment or instance bags")
 
-        def loss(b: Batch) -> torch.Tensor:
-            return self._concept_loss(layer, b) + self._aux_term(aux_head, layer, None, b)
+        def step(b: Batch, want_acc: bool, train: bool = False) -> Step:
+            logits = b.concept_logits(layer)
+            loss = self._concept_loss(layer, b, logits)
+            if train:
+                loss = loss + self._aux_term(aux_head, layer, None, b)
+            return loss, concept_accuracy(logits, b.t) if want_acc else None
 
+        group = (layer.concept_params() + _params(aux_head),
+                 self._optimizer(self.concept_lr, self.concept_weight_decay))
         if feed is not None:  # x -> c end to end: encoder + concept layer on the concept loss
             if not aligned.has_targets:
                 raise ValueError("`finetune:` with independent / sequential training needs concept targets "
                                  "(an alignment with targets, e.g. `human`); use `joint` to fine-tune without")
-            log = optimize_images([group], [layer], feed, loss, loss)
-            return {"finetune_epochs": log["epochs"], "concept_val_loss": log["val_loss"]}
+            log = optimize_images([group], [layer], feed, lambda b: step(b, train_acc, True), lambda b: step(b, val_acc),
+                                  select=self.concept_select)
+            return {"finetune_epochs": log["epochs"], "concept_val_loss": log["val_loss"]} | _extra(log, "concept")
         if not aligned.has_targets or layer.frozen:
             return {}
-        log = optimize([group], [layer], len(tr), lambda idx: loss(tr[idx]),
-                       lambda: float(self._concept_loss(layer, va)),
-                       self.concept_epochs, self.batch_size, self.patience, seed)
-        return {"concept_epochs": log["epochs"], "concept_val_loss": log["val_loss"]}
+        if self.concept_train_on_val:
+            tr, va = Batch.cat(tr, va), None
+        g = torch.Generator().manual_seed(seed + 1_000)  # draws the augmented view of each image
+        log = optimize([group], [layer], len(tr), lambda idx: step(tr[idx].view(layer, g), train_acc, True),
+                       None if va is None else lambda: step(va, val_acc),
+                       self.concept_epochs, self.batch_size, self.patience, seed,
+                       select=self.concept_select, drop_last=self.drop_last)
+        return {"concept_epochs": log["epochs"], "concept_val_loss": log["val_loss"]} | _extra(log, "concept")
 
-    def _optimizer(self, lr: float | None = None) -> OptimizerSpec:
-        return OptimizerSpec(self.optimizer, lr or self.lr, self.momentum, self.weight_decay)
+    def _optimizer(self, lr: float | None = None, weight_decay: float | None = None) -> OptimizerSpec:
+        return OptimizerSpec(self.optimizer, lr or self.lr, self.momentum,
+                             self.weight_decay if weight_decay is None else weight_decay)
 
     def _head_group(self, head: PredictorHead, params: list[nn.Parameter]) -> ParamGroup:
         if head.optimizer is not None:  # the head's own optimizer, as it asks for it (plain, no decay)
@@ -495,18 +662,35 @@ class _Base(Training):
         out: dict[str, float] = {}
         if not (layer.represent_uses_x or head.uses_features):
             tr, va = tr.without_x(), va.without_x()  # minibatches then index (N, K) tensors only
+        else:
+            tr, va = (dataclasses.replace(b, xa=None, views=None) for b in (tr, va))
+        if self.train_on_val:
+            tr, va = Batch.cat(tr, va), None
+        train_acc, val_acc = _acc_flags(self.select)
 
-        def task_loss(b: Batch) -> torch.Tensor:
-            return self._task_loss(head(rep_fn(b), b.normalized(layer) if head.uses_features else None, b.bag), b)
+        def task_step(b: Batch, want_acc: bool) -> Step:
+            logits = head(rep_fn(b), b.normalized(layer) if head.uses_features else None, b.bag)
+            return self._task_loss(logits, b), class_accuracy(logits, b.y) if want_acc else None
+
+        def train_step(idx) -> Step:
+            loss, acc = task_step(tr[idx], train_acc)
+            return loss + head.penalty(), acc
 
         for i, phase in enumerate(head.phases()):
             groups = [self._head_group(head, phase)] + ([(layer.rep_params(), self._optimizer())] if i == 0 else [])
-            log = optimize(groups, [layer, head], len(tr), lambda idx: task_loss(tr[idx]) + head.penalty(),
-                           lambda: float(task_loss(va)), self.epochs, self.batch_size,
-                           self.patience, seed + i, after_step=head.proximal_step)
+            log = optimize(groups, [layer, head], len(tr), train_step,
+                           None if va is None else lambda: task_step(va, val_acc), self.epochs, self.batch_size,
+                           self.patience, seed + i, after_step=head.proximal_step, select=self.select,
+                           drop_last=self.drop_last)
             out[f"head_phase{i}_epochs"] = log["epochs"]
             out["head_val_loss"] = log["val_loss"]
+            out |= _extra(log, "head")
         return out
+
+
+def _extra(log: dict[str, float], prefix: str) -> dict[str, float]:
+    """A phase log's selection entries beyond epochs and validation loss, under ``prefix``."""
+    return {f"{prefix}_{k}": v for k, v in log.items() if k not in ("epochs", "val_loss")}
 
 
 def _batch(ctx, aligned: AlignedConcepts, split: str, aux: bool = False) -> Batch:
@@ -517,7 +701,21 @@ def _batch(ctx, aligned: AlignedConcepts, split: str, aux: bool = False) -> Batc
 
 @TRAINING.register("sequential")
 class Sequential(_Base):
-    """Fit concepts to targets, freeze, then fit the predictor on predicted concepts."""
+    """Fit concepts to targets, freeze, then fit the predictor on predicted concepts.
+
+    ``head_on_augmented`` (needs ``augment:``): the predictor trains and is selected on the concept
+    predictions for one augmented view of each train / val image instead of the clean image, as in
+    Koh et al.'s code (its ``ExtractConcepts`` step applies the training transform to every split)."""
+
+    def __init__(self, head_on_augmented: bool = False, **kw):
+        super().__init__(**kw)
+        if head_on_augmented and self.augment is None:
+            raise ValueError("`stages.training.head_on_augmented` needs `stages.training.augment`")
+        self.head_on_augmented = head_on_augmented
+
+    @property
+    def _val_views(self) -> bool:
+        return super()._val_views or self.head_on_augmented
 
     def _fit(self, layer, head, aligned, tr, va, seed, feed=None, aux_head=None):
         self._prepare(layer, aligned, tr)
@@ -525,12 +723,16 @@ class Sequential(_Base):
         log = self._fit_concepts(layer, aligned, tr, va, seed, feed, aux_head)
         if feed is not None:  # the head sees the fine-tuned encoder's features
             tr, va = self._normalized(layer, feed.encode("train"), feed.encode("val"))
+        if self.head_on_augmented:
+            g = torch.Generator().manual_seed(seed + 2_000)
+            tr, va = tr.view(layer, g), va.view(layer, g)
         tr, va = self._frozen_concepts(layer, tr), self._frozen_concepts(layer, va)
         return log | self._fit_head(layer, head, tr, va, lambda b: layer.represent(b.c, b.x), seed + 1)
 
     @torch.no_grad()
     def _frozen_concepts(self, layer: ConceptLayer, b: Batch) -> Batch:
         """``b`` with the frozen concept layer's predictions ``c``, computed once rather than every step."""
+        layer.eval()  # no dropout, also when the x -> c phase was skipped
         if b.xn is not None:
             c = layer.activate(layer.logits_from_normalized(b.xn))
         else:  # instance bags, in chunks so that the normalized bag never exists in full
@@ -560,13 +762,18 @@ class Independent(_Base):
 @TRAINING.register("joint")
 class Joint(_Base):
     """End-to-end: task loss + ``concept_weight`` x concept loss (when targets exist). With ``aux:``
-    the auxiliary concepts also go through the head, so ``aux`` changes the head on a frozen backbone too."""
+    the auxiliary concepts also go through the head, so ``aux`` changes the head on a frozen backbone too.
+
+    ``normalize_loss`` divides the sum by ``1 + concept_weight``, as Koh et al.'s ``-normalize_loss``
+    divides by ``1 + lambda * K`` (their concept loss sums over the K concepts, so their lambda * K is
+    our ``concept_weight``), auxiliary terms included. Under SGD this equals scaling ``lr`` and
+    ``weight_decay``, not ``lr`` alone."""
 
     aux_reaches_head = True
 
-    def __init__(self, concept_weight: float = 1.0, **kw):
+    def __init__(self, concept_weight: float = 1.0, normalize_loss: bool = False, **kw):
         super().__init__(**kw)
-        self.concept_weight = concept_weight
+        self.concept_weight, self.normalize_loss = concept_weight, normalize_loss
 
     def _aux_loss(self, aux_head, layer, head, b):
         """The auxiliary concepts go through the head as ``activate``-d logits. They skip the layer's
@@ -582,27 +789,43 @@ class Joint(_Base):
         self._prepare(layer, aligned, tr)
         tr, va = self._normalized(layer, tr, va)
         use_c = aligned.has_targets and self.concept_weight > 0
+        train_acc, val_acc = _acc_flags(self.select)
 
-        def total(b: Batch) -> torch.Tensor:
+        def total(b: Batch, want_acc: bool, train: bool = False) -> Step:
             xn = b.normalized(layer) if head.uses_features else None
-            rep = layer.represent(layer.activate(b.concept_logits(layer, xn)), b.x)  # = layer(b.x)[1]
-            loss = self._task_loss(head(rep, xn, b.bag), b)
-            if use_c:
-                loss = loss + self.concept_weight * self._concept_loss(layer, b)
-            return loss + self._aux_term(aux_head, layer, head, b)
+            c_logits = b.concept_logits(layer, xn)
+            rep = layer.represent(layer.activate(c_logits), b.x)  # = layer(b.x)[1]
+            logits = head(rep, xn, b.bag)
+            loss = self._task_loss(logits, b)
+            if use_c:  # under dropout, the concept loss must see the mask the head saw
+                loss = loss + self.concept_weight * self._concept_loss(
+                    layer, b, c_logits if layer.dropout is not None else None)
+            if train:
+                loss = loss + self._aux_term(aux_head, layer, head, b)
+            if self.normalize_loss:  # Koh et al. divide the whole loss, auxiliary terms included
+                loss = loss / (1 + (self.concept_weight if use_c else 0.0))
+            return loss, class_accuracy(logits, b.y) if want_acc else None
+
+        def train_step(b: Batch) -> Step:
+            loss, acc = total(b, train_acc, train=True)
+            return loss + head.penalty(), acc
 
         groups = [(layer.concept_params() + layer.rep_params() + _params(aux_head), self._optimizer()),
                   self._head_group(head, list(head.parameters()))]
         if feed is not None:  # encoder, concept layer and head together, on images
-            log = optimize_images(groups, [layer, head], feed, lambda b: total(b) + head.penalty(), total,
-                                  after_step=head.proximal_step)
+            log = optimize_images(groups, [layer, head], feed, train_step, lambda b: total(b, val_acc),
+                                  after_step=head.proximal_step, select=self.select)
             va = feed.encode("val")
             out = {"finetune_epochs": log["epochs"], "joint_val_loss": log["val_loss"]}
         else:
-            log = optimize(groups, [layer, head], len(tr), lambda idx: total(tr[idx]) + head.penalty(),
-                           lambda: float(total(va)), self.epochs, self.batch_size, self.patience, seed,
-                           after_step=head.proximal_step)
+            tr_fit, va_fit = (Batch.cat(tr, va), None) if self.train_on_val else (tr, va)
+            g = torch.Generator().manual_seed(seed + 1_000)  # draws the augmented view of each image
+            log = optimize(groups, [layer, head], len(tr_fit), lambda idx: train_step(tr_fit[idx].view(layer, g)),
+                           None if va_fit is None else lambda: total(va_fit, val_acc), self.epochs,
+                           self.batch_size, self.patience, seed, after_step=head.proximal_step,
+                           select=self.select, drop_last=self.drop_last)
             out = {"joint_epochs": log["epochs"], "joint_val_loss": log["val_loss"]}
+        out |= _extra(log, "joint")
         if use_c:
             with torch.no_grad():
                 out["concept_val_loss"] = float(self._concept_loss(layer, va))
@@ -612,7 +835,8 @@ class Joint(_Base):
 class _ImbalanceWeightedConcepts:
     """Koh et al. (2020): concept k's BCE is scaled by its negative/positive ratio on the training
     targets, ``(1 - p_k) / p_k`` (their ``BCEWithLogitsLoss(weight=...)``, not ``pos_weight``), then
-    averaged over concepts. Needs binary (N, K) image-level targets."""
+    averaged over concepts. Needs binary (N, K) image-level targets. The ratios come from the
+    training split only, also when training on train + val (as theirs come from ``train.pkl``)."""
 
     def _prepare(self, layer, aligned, tr):
         super()._prepare(layer, aligned, tr)

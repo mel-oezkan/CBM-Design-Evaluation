@@ -15,13 +15,16 @@ For a batch of features `x` of shape `(N, D)` and `K` concepts:
 
 ```text
 x_n    = (x − μ) / σ
-z      = (W · x_n + b − m) / s
+z      = (W · dropout(x_n) + b − m) / s
 c_hat  = sigmoid(z) if the targets are binary, else z
 rep    = represent(c_hat, x)
 logits = head(rep, x_n)
 ```
 
-- `μ`, `σ`: per-feature mean and standard deviation of the training split.
+- `μ`, `σ`: per-feature mean and standard deviation of the training split, or 0 and 1 with
+  `generation: {standardize: false}` (raw features, as Koh et al.).
+- `dropout`: the identity unless `generation: {dropout: p}` (active only while training).
+  `generation: {init_std: s}` draws `W` from a normal truncated at ±2s instead of PyTorch's default.
 - `z`: the concept logits, `(N, K)`. `m` and `s` are 0 and 1 unless the layer was calibrated (see
   below).
 - `represent` comes from the generation stage, and `head` from the predictor stage. `logits` has
@@ -100,8 +103,22 @@ Every step above runs the same loop (`optimize` in `stages/training.py`):
 3. It stops after `patience` epochs without an improvement of more than 1e-5, or after `epochs`
    epochs (`concept_epochs` for step 1), and **restores the weights of the best epoch**.
 
+What "best" means is `select` (`concept_select` for step 1):
+
+| `select` | The best epoch has |
+|---|---|
+| `val_loss` (default) | the lowest validation loss, as above |
+| `val_acc` | the highest validation accuracy: task accuracy for heads and `joint`, concept accuracy (`sigmoid ≥ 0.5` against the binary targets) for step 1 |
+| `train_acc` | the highest running training accuracy, averaged over the epoch's minibatches as they are trained (with dropout and augmentation) |
+
+`train_on_val: true` (`concept_train_on_val` for step 1) trains on the training and validation
+splits together, which leaves only `train_acc` to select on. This is how Koh et al. retrain their
+final models. Accuracies improve only when strictly higher; `drop_last: true` skips each epoch's
+last incomplete minibatch.
+
 Concept and representation parameters use the stage's `optimizer` (Adam by default, or SGD with
-`momentum`; both with `weight_decay`) at its `lr`. The head uses its own optimizer if it declares
+`momentum`; both with `weight_decay`) at its `lr`; step 1 of `independent` / `sequential` can use
+its own `concept_lr` and `concept_weight_decay`. The head uses its own optimizer if it declares
 one: `sparse` uses plain SGD at its own `lr` (default 0.1), so that the soft-thresholding step is a
 true proximal-gradient update; every other head uses the stage's optimizer and `lr`.
 
@@ -122,7 +139,9 @@ and matches the padded computation up to float summation order.
 
 The log (`train_log.json`, and the `train.*` fields of the results row) records the epochs and the
 best validation loss of each step, e.g. `concept_epochs`, `concept_val_loss`,
-`head_phase0_epochs`, `head_val_loss`, plus head statistics such as `head.nonzero_frac`.
+`head_phase0_epochs`, `head_val_loss`, plus head statistics such as `head.nonzero_frac`. It also
+records each step's best epoch (`concept_best_epoch`, ...) and, when selecting on accuracy, the
+selected accuracy (`concept_train_acc`, `head_val_acc`, `joint_train_acc`, ...).
 
 ### Options
 
@@ -133,16 +152,23 @@ These keys apply to every scheme:
 | `epochs` | 200 | maximum epochs per head phase, or for the whole `joint` fit |
 | `concept_epochs` | = `epochs` | maximum epochs for step 1 |
 | `batch_size` | 256 | minibatch size |
+| `drop_last` | false | skip each epoch's last incomplete minibatch |
 | `lr` | 0.001 | learning rate (and the head's, unless it sets its own) |
 | `optimizer` | `adam` | `adam` or `sgd`, for the concept layer and every head without its own |
 | `momentum` | 0.0 | SGD momentum (needs `optimizer: sgd`) |
 | `weight_decay` | 0.0 | L2 weight decay of that optimizer |
+| `concept_lr`, `concept_weight_decay` | = `lr`, `weight_decay` | step 1's learning rate and weight decay |
 | `patience` | 10 | epochs without improvement before stopping |
+| `select`, `concept_select` | `val_loss` | how the best epoch is chosen; see [Optimization](#optimization) |
+| `train_on_val`, `concept_train_on_val` | false | also train on the validation split (needs `train_acc`) |
 | `concept_loss` | `auto` | see [Losses](#losses) |
 | `device` | `cpu` | `auto` uses a GPU when there is one |
 | `finetune` | none | train the backbone too; see below |
+| `augment` | none | train on augmented views of the images, backbone frozen; see below |
 | `aux` | none | Koh et al.'s auxiliary concept head; see below |
 | `concept_weight` | 1.0 | `joint` only: weight of the concept loss |
+| `normalize_loss` | false | `joint` only: divide the loss by `1 + concept_weight` (Koh et al.'s `-normalize_loss`) |
+| `head_on_augmented` | false | `sequential` only: fit the head on predictions for augmented views (needs `augment`) |
 
 Change them in the config, never in the code: `{name: joint, concept_weight: 0.1, epochs: 100}`.
 
@@ -153,6 +179,22 @@ the real ones. The concept layer runs on each instance, and the `mil` head pools
 prediction per image. Concept losses are averaged over real instances. If the targets are per image
 (`human`, `clip`, `dino`), they supervise the maximum over each image's instances, the standard
 multiple-instance assumption. See the [SEG-MIL-CBM example](instance-bags.md).
+
+## Augmentation with a frozen backbone
+
+With `augment: {views: V}`, the backbone stays frozen, but step 1 and `joint` train on augmented
+images, as fine-tuning does. `V` copies of every training image under the backbone's
+`train_transform` (for `inception`, Koh et al.'s color jitter, random resized crop and flip) are
+encoded once and cached as `(N, V, D)` float16 features (`Context.augmented`). Each optimizer step
+reads one randomly drawn view per image. Validation, the head of `independent` / `sequential` and
+evaluation use the clean features.
+
+View `v` of image `i` is seeded by `(seed, v, i)` alone (`augment.seed`, default 0), so the views do
+not depend on the run's seed, the worker count or how many views are drawn, and every run with the
+same dataset and backbone shares them. A finite pool of views stands in for fresh augmentation
+every epoch; the `augment.views` ablation measures how much the pool size matters. `num_workers` and
+`batch_size` only batch the encoding. Augmentation can't be combined with `finetune:` (which
+augments on its own) or with `instances:`.
 
 ## Fine-tuning the backbone
 
@@ -172,7 +214,8 @@ features, and the encoder is saved to `runs/<run>/encoder.pt`.
 
 Only backbones that support it (`inception`, `toy`) can be fine-tuned. It can't be combined with
 `instances:` or with evaluators that read patch features (`localization`, `keypoint_distance`,
-`part_iou`). See `configs/anchors/cub_koh2020.yaml` for a full example.
+`part_iou`). See `configs/anchors/cub_koh2020.yaml` for a full example. Fine-tuning selects on the
+validation split, so `train_on_val` / `concept_train_on_val` are not available with it.
 
 ## Auxiliary concept head
 
@@ -197,14 +240,18 @@ What it changes depends on the backbone:
 | `joint` | trains the head on the auxiliary concepts | both |
 
 It needs a backbone with an auxiliary tap (`inception`, or `toy` with `aux_dim`) and concept
-targets. It can't be combined with `instances:`. In `joint` training, it needs a generation and
-head that read only concepts (not `embeddings` or `residual`).
+targets. It can't be combined with `instances:`, nor with `augment:`: the cached auxiliary features
+come from the clean images, not from the augmented views. In `joint` training, it needs a generation
+and head that read only concepts (not `embeddings` or `residual`). With `train_on_val`, the
+auxiliary head trains on train + val as well, and `normalize_loss` divides its terms too.
 
 ## Changing the training
 
 Every option above is a config key, so most changes need no code. For a new loss, subclass a scheme
-and override one hook, `_task_loss(logits, batch)` or `_concept_loss(layer, batch)`, and register
-it under a new name (see [Contributing](contributing.md)). A concept loss reads the features as
-`batch.concept_logits(layer)`, which uses the precomputed normalization (and skips the padding of instance bags). A head that needs special treatment
+and override one hook, `_task_loss(logits, batch)` or `_concept_loss(layer, batch, logits=None)`, and
+register it under a new name (see [Contributing](contributing.md)). A concept loss uses `logits` when
+the caller passes them (so that, under dropout, it sees the same mask as the rest of the step) and
+otherwise reads `batch.concept_logits(layer)`, which uses the precomputed normalization (and skips
+the padding of instance bags). A head that needs special treatment
 declares it through `penalty()`, `proximal_step()`, `phases()` or its own `optimizer` / `lr`, so the
 training schemes never need to know which head they train.

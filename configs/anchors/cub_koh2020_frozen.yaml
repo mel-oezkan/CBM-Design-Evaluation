@@ -1,0 +1,40 @@
+# Koh et al. 2020, CUB, JOINT bottleneck (lambda = 0.01) on a FROZEN Inception-v3 (paper, fine-tuned:
+# Table 1 0.199 task error, Table 2 0.031 concept error). Data and concept layer as in
+# cub_koh2020_frozen_independent.yaml; gaps as listed there, plus:
+#   - no auxiliary head: in their joint model the auxiliary concept logits also pass through the
+#     shared c -> y layer (0.4 x its loss), which would train that layer even with a frozen backbone.
+# As in their code: one SGD optimizer (lr 0.001, momentum 0.9, weight decay 4e-4, batch 64) for the
+# concept layer and the linear head on the concept logits; loss = (CE + lambda * sum_k w_k BCE_k) /
+# (1 + lambda * 112), i.e. concept_weight = 0.01 * 112 with our concept-averaged BCE and
+# normalize_loss; trained on train + val for up to 1000 epochs, keeping the epoch with the best running
+# training task accuracy (patience 100).
+name: cub_koh2020_frozen
+dataset: {name: cub, root: data/CUB_200_2011, majority_vote: koh, split_dir: data/CUB_processed/class_attr_data_10}
+backbone: {name: inception, mean: [0.5, 0.5, 0.5], std: [2, 2, 2], eval_resize: false}
+stages:
+  discovery: {name: dataset}
+  filtering: [{name: rules, remove_class_names: false, max_words: 10}]
+  generation: {name: logits, dropout: 0.5, standardize: false, init_std: 0.1}
+  alignment: {name: human}
+  predictor: {name: dense}
+  training:
+    name: joint_weighted
+    concept_weight: 1.12
+    normalize_loss: true
+    optimizer: sgd
+    momentum: 0.9
+    batch_size: 64
+    drop_last: true
+    patience: 100
+    lr: 0.001
+    weight_decay: 0.0004
+    epochs: 1000
+    select: train_acc
+    train_on_val: true
+    augment: {views: 64, num_workers: 8}
+    device: auto
+evaluation:
+  - {name: shift, splits: [test]}
+  - {name: concepts}
+  - {name: leakage}
+paths: {cache: .cache, runs: runs/cub_koh2020_frozen, results: results/cub_koh2020_frozen.jsonl}

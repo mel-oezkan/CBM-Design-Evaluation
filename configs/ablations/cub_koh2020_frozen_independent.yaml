@@ -1,0 +1,17 @@
+# Koh et al. 2020 on a frozen backbone (independent): undo one detail of the authors' code at a time to
+# measure how much it matters. Each alternative is the pipeline's default.
+anchor: ../anchors/cub_koh2020_frozen_independent.yaml
+mode: ofat
+seeds: [1, 2, 3]
+factors:
+  dataset.majority_vote: [mean]                        # pipeline vote: 93 concepts, labels differ from theirs
+  dataset.split_dir: [null]                            # pipeline's own 90/10 train/val split
+  backbone: [{name: inception, eval_resize: false}]    # ImageNet input normalization
+  backbone.eval_resize: [true]                         # eval images resized to 299 x 299, not center-cropped
+  stages.training.augment: [null]                      # no augmentation: clean cached features
+  stages.training.augment.views: [8]                   # a smaller pool of augmented views
+  stages.generation.dropout: [0.0]                     # no dropout before the concept layer
+  stages.generation.standardize: [true]                # z-scored features
+  stages.generation.init_std: [null]                   # PyTorch's default init of the concept layer
+  stages.training.concept_train_on_val: [false]        # x -> c on train only (still selected by training accuracy)
+  stages.training.name: [independent]                  # unweighted concept BCE

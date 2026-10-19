@@ -232,4 +232,6 @@ Two worked examples:
 - [SEG-MIL-CBM](instance-bags.md) needed new components and one architecture extension (instance
   bags).
 - [Koh et al. 2020](koh2020_reproduction.md) needed only opt-in kwargs and weighted training
-  variants, plus backbone fine-tuning.
+  variants, plus backbone fine-tuning. Matching the authors' code in detail added general options
+  (model selection, training on train + val, augmented views on a frozen backbone, concept-layer
+  dropout and init), each of which an ablation removes again.

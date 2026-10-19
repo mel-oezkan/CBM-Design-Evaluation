@@ -56,7 +56,8 @@ def _interface(items: list) -> str | None:
     classes = [o for o in items if inspect.isclass(o)]
     if not classes:
         return None
-    shared = [b for b in classes[0].__mro__[1:] if inspect.isabstract(b) and all(issubclass(c, b) for c in classes)]
+    shared = [b for b in classes[0].__mro__[1:] if inspect.isabstract(b) and not b.__name__.startswith("_")
+              and all(issubclass(c, b) for c in classes)]  # a private helper base is not the interface
     if not shared:
         return None
     base = shared[0]

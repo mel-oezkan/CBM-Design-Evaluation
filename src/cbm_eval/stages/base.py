@@ -74,13 +74,20 @@ class ConceptLayer(nn.Module):
 
     Subclasses (one per Generation variant) only decide how ``c_hat`` becomes the representation.
     Inputs are (N, D) image features or (N, M, D) instance bags; everything broadcasts over M.
+
+    The x -> c linear layer reads features standardized with training statistics (``standardize``)
+    or raw, through ``dropout`` while training; ``init_std`` draws its weights from a normal
+    truncated at +-2 std (None: PyTorch's default init). An alignment's ``init_weight`` takes precedence.
     """
 
-    def __init__(self, in_dim: int, aligned: AlignedConcepts):
+    def __init__(self, in_dim: int, aligned: AlignedConcepts, dropout: float = 0.0, standardize: bool = True,
+                 init_std: float | None = None):
         super().__init__()
         k = len(aligned.concepts)
         self.n_concepts, self.target_type = k, aligned.target_type
         self.linear = nn.Linear(in_dim, k)
+        self.dropout = nn.Dropout(dropout) if dropout else None  # none at all at 0: no RNG draws
+        self.standardize = standardize
         self.register_buffer("x_mean", torch.zeros(in_dim))
         self.register_buffer("x_std", torch.ones(in_dim))
         self.register_buffer("c_mean", torch.zeros(k))
@@ -91,6 +98,8 @@ class ConceptLayer(nn.Module):
             with torch.no_grad():
                 self.linear.weight.copy_(w / w.norm(dim=1, keepdim=True).clamp_min(1e-8))
                 self.linear.bias.zero_()
+        elif init_std is not None:
+            nn.init.trunc_normal_(self.linear.weight, std=init_std, a=-2 * init_std, b=2 * init_std)
         if self.frozen:
             self.linear.requires_grad_(False)
 
@@ -98,6 +107,8 @@ class ConceptLayer(nn.Module):
     represent_uses_x: bool = True  # False when ``represent`` ignores ``x`` (training then drops the features)
 
     def fit_input_stats(self, x: torch.Tensor, bag: Bag | None = None) -> None:
+        if not self.standardize:
+            return
         x = instance_rows(x, bag)
         self.x_mean.copy_(x.mean(0))
         self.x_std.copy_(x.std(0).clamp_min(1e-6))
@@ -120,6 +131,8 @@ class ConceptLayer(nn.Module):
     def logits_from_normalized(self, x_norm: torch.Tensor) -> torch.Tensor:
         """``concept_logits`` of features already passed through ``normalize`` (training normalizes
         frozen features once). Override this, not ``concept_logits``, to change the scores."""
+        if self.dropout is not None:
+            x_norm = self.dropout(x_norm)
         return (self.linear(x_norm) - self.c_mean) / self.c_std
 
     def activate(self, logits: torch.Tensor) -> torch.Tensor:

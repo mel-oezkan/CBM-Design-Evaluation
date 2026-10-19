@@ -18,7 +18,7 @@ from torch.utils.data import Dataset as TorchDataset
 from .backbones.base import Backbone
 from .config import ExperimentConfig
 from .data.base import SPLITS, ImageDataset
-from .data.features import encode_split, load_aux_features, load_features
+from .data.features import encode_split, load_augmented_features, load_aux_features, load_features
 from .data.parts import input_geometry, load_parts
 from .stages.common import match_names
 from .structures import Bag, ConceptSet, FeatureSplit, InstanceSplit, PartSplit
@@ -46,6 +46,7 @@ class Context:
         self._encoder: nn.Module | None = None  # fine-tuned image encoder of the current run, if any
         self._images: dict[tuple[str, bool], TorchDataset] = {}
         self._aux: dict[str, torch.Tensor] = {}
+        self._views: dict[tuple[str, int, int], torch.Tensor] = {}
         self._workers = 0  # dataloader workers for encoding images with the fine-tuned encoder
         for bb in {id(b): b for b in (self.backbone, self.teacher) if b is not None}.values():
             bb.to(self.device)
@@ -102,6 +103,19 @@ class Context:
             dataset, split = self.source(name)
             self._aux[name] = load_aux_features(dataset, self.backbone, split, self.cache_dir)
         return self._aux[name]
+
+    def augmented(self, name: str, views: int, seed: int = 0, batch_size: int = 128,
+                  num_workers: int = 0) -> torch.Tensor:
+        """(N, V, D) frozen-backbone features of ``views`` augmented copies (the backbone's
+        ``train_transform``) of every image of a split, cached on disk; view ``v`` of an image is the
+        same for any ``views`` > v. Rows are aligned with ``split(name)``. ``batch_size`` and
+        ``num_workers`` only batch the encoding."""
+        key = (name, views, seed)
+        if key not in self._views:
+            dataset, split = self.source(name)
+            self._views[key] = load_augmented_features(dataset, self.backbone, split, self.cache_dir, views, seed,
+                                                       batch_size, num_workers)
+        return self._views[key]
 
     def image_split(self, name: str, augment: bool = False) -> TorchDataset:
         """Images of a split as a torch dataset of dicts (``image``, ``label``, ``index``, ...), with

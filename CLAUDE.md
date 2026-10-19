@@ -119,8 +119,8 @@ Kind-specific contracts:
   `uses_features = False` on the head only if `forward` ignores `x_norm`.
 - **Training**: must respect `layer.frozen`, `aligned.has_targets`, `head.optimizer/lr` and
   `head.phases()`; return a flat `dict[str, float]` log. Losses are hooks on the training base
-  class: `_task_loss(logits, batch)` (cross-entropy) and `_concept_loss(layer, batch)` (selected by
-  `concept_loss:`, reading concept logits as `batch.concept_logits(layer)`). A new loss is a subclass of `Sequential`/`Joint`/`Independent` that overrides
+  class: `_task_loss(logits, batch)` (cross-entropy) and `_concept_loss(layer, batch, logits=None)` (selected by
+  `concept_loss:`, using the caller's `logits` if given, else `batch.concept_logits(layer)`). A new loss is a subclass of `Sequential`/`Joint`/`Independent` that overrides
   one hook and is registered under its own name; don't add a `loss:` string switch.
 - **Concept scorer**: if it caches scores, keep its output-relevant args in `self.kw` and build the
   key from `cache_key()` (see `GroundingDINOScorer`).

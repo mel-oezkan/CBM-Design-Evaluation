@@ -1,0 +1,17 @@
+# Koh et al. 2020 on a frozen backbone (sequential): undo one detail of the authors' code at a time.
+# The x -> c factors of the independent sweep apply here as well; this sweep adds the ones that act
+# through the head on predicted concepts.
+anchor: ../anchors/cub_koh2020_frozen_sequential.yaml
+mode: ofat
+seeds: [1, 2, 3]
+factors:
+  backbone: [{name: inception, eval_resize: false}]    # ImageNet input normalization
+  backbone.eval_resize: [true]                         # eval images resized to 299 x 299, not center-cropped
+  stages.training.head_on_augmented: [false]           # head on predictions for the clean train / val images
+  stages.training:                                     # no augmentation at all (head_on_augmented needs it)
+    - {name: sequential_weighted, optimizer: sgd, momentum: 0.9, batch_size: 64, drop_last: true, patience: 100,
+       concept_lr: 0.01, concept_weight_decay: 0.00004, concept_epochs: 1000, concept_select: train_acc,
+       concept_train_on_val: true, lr: 0.001, weight_decay: 0.00004, epochs: 1000, select: val_acc, device: auto}
+  stages.generation: [{name: scores, dropout: 0.5, standardize: false, init_std: 0.1}]  # probabilities into the head
+  stages.generation.dropout: [0.0]                     # no dropout before the concept layer
+  stages.training.concept_train_on_val: [false]        # x -> c on train only

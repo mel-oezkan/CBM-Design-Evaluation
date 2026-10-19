@@ -101,6 +101,27 @@ def test_aux_refuses_bags_and_bad_specs(base_cfg):
     assert PipelineBuilder(_cfg(base_cfg, {"name": "joint", "aux": {}})).training.needs_aux  # {} = defaults
     with pytest.raises(ValueError, match="finetune"):
         PipelineBuilder(_cfg(base_cfg, {"name": "sequential", "aux": {}}))
+    with pytest.raises(ValueError, match="augment"):
+        PipelineBuilder(_cfg(base_cfg, {"name": "joint", "aux": {}, "augment": {"views": 2}}))
+
+
+def test_frozen_joint_aux_trains_on_train_and_val(base_cfg):
+    """With ``train_on_val`` the validation split carries auxiliary features too, so it is trained on."""
+    training = {"name": "joint_weighted", "epochs": 3, "aux": AUX, "train_on_val": True, "select": "train_acc"}
+    res = run(_cfg(base_cfg, training), save=False)
+    assert all(not math.isnan(v) for v in res.metrics.values()), res.metrics
+    only_train = run(_cfg(base_cfg, {**training, "train_on_val": False}), save=False)
+    assert not torch.allclose(_head_weight(res), _head_weight(only_train))
+
+
+def test_normalize_loss_divides_the_aux_terms_too(base_cfg):
+    """Koh et al. divide the whole loss, auxiliary terms included, by ``1 + concept_weight``: under SGD
+    without momentum or decay that equals dividing ``lr``."""
+    sgd = {"name": "joint_weighted", "epochs": 3, "aux": AUX, "concept_weight": 1.5, "optimizer": "sgd"}
+    run(_cfg(base_cfg, {**sgd, "epochs": 1}), save=False)  # warm both feature caches: extraction draws random numbers
+    normalized = run(_cfg(base_cfg, {**sgd, "lr": 0.01, "normalize_loss": True}), save=False)
+    scaled = run(_cfg(base_cfg, {**sgd, "lr": 0.01 / 2.5}), save=False)
+    assert torch.allclose(_head_weight(normalized), _head_weight(scaled), atol=1e-6)
 
 
 def test_a_cold_aux_cache_does_not_shift_the_run(base_cfg):

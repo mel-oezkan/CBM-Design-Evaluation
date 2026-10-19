@@ -3,11 +3,13 @@ Models" (ICML 2020).
 
 Frozen for feature caching like every backbone; ``trainable``, so a training stage with
 ``finetune:`` can optimize a copy end to end as Koh et al. do. Patch features are the final
-``Mixed_7c`` map (8x8 at 299 px). The auxiliary tap (``aux_dim`` 768) is the pooled output of
-the ImageNet-trained ``AuxLogits`` convolutions on ``Mixed_6e``, without their classifier; a training
-stage with ``aux:`` puts Koh et al.'s auxiliary concept head on it. Deviations from Koh et al.: standard
-ImageNet input normalization (their code scales inputs by mean 0.5 / std 2 before ``transform_input``)
-and eval images are resized rather than center-cropped.
+``Mixed_7c`` map (8x8 at 299 px). The weights are the authors' (``inception_v3_google-1a9a5a14``
+equals torchvision's ``IMAGENET1K_V1``). By default inputs get ImageNet normalization and eval images
+are resized to a square; ``mean: [0.5, 0.5, 0.5], std: [2, 2, 2]`` and ``eval_resize: false``
+reproduce Koh et al.'s code (which scales inputs that way before ``transform_input`` and
+center-crops eval images without resizing). The auxiliary tap (``aux_dim`` 768) is the pooled output
+of the ImageNet-trained ``AuxLogits`` convolutions on ``Mixed_6e``, without their classifier; a
+training stage with ``aux:`` puts Koh et al.'s auxiliary concept head on it.
 """
 
 from __future__ import annotations
@@ -77,14 +79,22 @@ class InceptionEncoder(nn.Module):
 
 @BACKBONES.register("inception")
 class InceptionBackbone(Backbone):
-    """``weights`` is a torchvision ``Inception_V3_Weights`` name; they load on first use."""
+    """``weights`` is a torchvision ``Inception_V3_Weights`` name; they load on first use.
+    ``mean`` / ``std`` normalize inputs (None: ImageNet's). ``eval_resize``: eval images are resized
+    to ``image_size`` squared; if False they are center-cropped to it at their own resolution."""
 
     trainable = True
     aux_dim = 768
 
-    def __init__(self, weights: str | None = "IMAGENET1K_V1", image_size: int = 299):
+    def __init__(self, weights: str | None = "IMAGENET1K_V1", image_size: int = 299,
+                 mean: list[float] | None = None, std: list[float] | None = None, eval_resize: bool = True):
         super().__init__()
         self.kw = {"weights": weights, "image_size": image_size}
+        # Only non-default preprocessing enters the key, so features cached before these options stay valid.
+        self.kw |= {k: v for k, v, default in (("mean", mean, None), ("std", std, None),
+                                               ("eval_resize", eval_resize, True)) if v != default}
+        self.norm = T.Normalize(mean or _IMAGENET[0], std or _IMAGENET[1])
+        self.eval_resize = eval_resize
         self.dim, self.patch_grid = 2048, (image_size - 299) // 32 + 8
         self._encoder: InceptionEncoder | None = None
 
@@ -93,13 +103,14 @@ class InceptionBackbone(Backbone):
 
     def transform(self):
         size = self.kw["image_size"]
-        return T.Compose([T.Resize((size, size)), T.ToTensor(), T.Normalize(*_IMAGENET)])
+        geometry = T.Resize((size, size)) if self.eval_resize else T.CenterCrop(size)
+        return T.Compose([geometry, T.ToTensor(), self.norm])
 
     def train_transform(self):
         """Koh et al.'s augmentation (after Cui et al., 2018): color jitter, random resized crop, flip."""
         return T.Compose([T.ColorJitter(brightness=32 / 255, saturation=(0.5, 1.5)),
                           T.RandomResizedCrop(self.kw["image_size"]), T.RandomHorizontalFlip(),
-                          T.ToTensor(), T.Normalize(*_IMAGENET)])
+                          T.ToTensor(), self.norm])
 
     @property
     def frozen(self) -> InceptionEncoder:

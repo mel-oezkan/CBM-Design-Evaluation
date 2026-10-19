@@ -31,7 +31,7 @@ class MyFilter(Filter):
 Import the module from its package `__init__.py`. It then becomes available as `{name: my_filter, threshold: 0.3}`.
 
 A new loss is a training subclass that overrides one hook, `_task_loss(logits, batch)` or
-`_concept_loss(layer, batch)`, registered under its own name:
+`_concept_loss(layer, batch, logits=None)`, registered under its own name:
 
 ```python
 import torch.nn.functional as F

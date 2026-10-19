@@ -1,0 +1,15 @@
+# Koh et al. 2020 on a frozen backbone (joint): undo one detail of the authors' code at a time.
+anchor: ../anchors/cub_koh2020_frozen.yaml
+mode: ofat
+seeds: [1, 2, 3]
+factors:
+  dataset.majority_vote: [mean]                        # pipeline vote: 93 concepts, labels differ from theirs
+  backbone: [{name: inception, eval_resize: false}]    # ImageNet input normalization
+  backbone.eval_resize: [true]                         # eval images resized to 299 x 299, not center-cropped
+  stages.training.augment: [null]                      # no augmentation: clean cached features
+  stages.generation: [{name: scores, dropout: 0.5, standardize: false, init_std: 0.1}]  # probabilities into the head
+  stages.generation.dropout: [0.0]                     # no dropout before the concept layer
+  stages.generation.standardize: [true]                # z-scored features
+  stages.training.train_on_val: [false]                # train only (still selected by training accuracy)
+  stages.training.normalize_loss: [false]              # loss not divided by 1 + lambda * K
+  stages.training.name: [joint]                        # unweighted concept BCE
