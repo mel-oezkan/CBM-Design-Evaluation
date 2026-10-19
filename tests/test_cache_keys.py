@@ -53,7 +53,7 @@ CASES = {
                    "noise": 0.1, "concept_strength": 1.0, "background_strength": 0.5, "residual_strength": 0.1,
                    "data_seed": 1}, {}),
     "toy": (ToyBackbone, lambda **kw: ToyBackbone(**kw), lambda o: o.cache_key(),
-            {"latent_dim": 32, "dim": 64, "seed": 1},
+            {"latent_dim": 32, "dim": 64, "seed": 1, "aux_dim": 8},
             {"grid": "patch_grid metadata only; patch features come from the synthetic dataset"}),
     "inception": (InceptionBackbone, lambda **kw: InceptionBackbone(**kw), lambda o: o.cache_key(),
                   {"weights": None, "image_size": 331}, {}),  # weights load lazily, so nothing is downloaded

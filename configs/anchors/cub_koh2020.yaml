@@ -7,13 +7,15 @@
 #   end to end with SGD (momentum 0.9, weight decay 4e-4, batch 64) and their augmentation; linear
 #   c -> y head on concept logits; imbalance-weighted concept BCE; lambda = 0.01 (their concept loss
 #   sums over the 112 concepts, ours averages, so concept_weight = 0.01 * 112). They divide the loss
-#   by 1 + lambda * 112 = 2.12 and we do not, so the encoder lr is 0.001 / 2.12.
+#   by 1 + lambda * 112 = 2.12 and we do not, so the encoder lr is 0.001 / 2.12. Auxiliary Inception
+#   head on Mixed_6e (`aux`, their -use_aux): 0.4 x the same loss on its concept logits, which also
+#   pass through the shared c -> y head.
 # Remaining gaps:
 #   - model selection: early stopping on the val loss (ours) vs. up to 1000 epochs, retrained on
 #     train+val and picked by training accuracy (theirs); concept layer and head use Adam (ours) vs. SGD
 #     (`stages.training.optimizer: sgd` expresses theirs; not set, to keep this anchor's run id);
-#   - no auxiliary Inception head (theirs: 0.4 x aux loss); ImageNet input normalization (theirs:
-#     mean 0.5 / std 2); eval images resized to 299 (theirs: center crop without resizing);
+#   - ImageNet input normalization (theirs: mean 0.5 / std 2); eval images resized to 299 (theirs:
+#     center crop without resizing); the auxiliary head reads standardized features (theirs: raw);
 #   - interventions (leakage evaluator) replace random single concepts, not visibility-aware groups.
 name: cub_koh2020
 dataset: {name: cub, root: data/CUB_200_2011, majority_vote: koh, split_dir: data/CUB_processed/class_attr_data_10}
@@ -27,6 +29,7 @@ stages:
   training:
     name: joint_weighted
     concept_weight: 1.12
+    aux: {weight: 0.4, init_std: 0.001}
     device: auto
     finetune: {epochs: 300, lr: 0.00047, optimizer: sgd, momentum: 0.9, weight_decay: 0.0004, batch_size: 64,
                patience: 30, num_workers: 8}

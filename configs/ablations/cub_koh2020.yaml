@@ -9,3 +9,4 @@ factors:
   dataset.split_dir: [null]                # pipeline's own 90/10 train/val split
   stages.generation: [{name: scores}]      # sigmoid probabilities into the head instead of logits
   stages.training.name: [joint]               # unweighted concept BCE
+  stages.training.aux: [null]              # no auxiliary head: the shared head sees only the main concepts

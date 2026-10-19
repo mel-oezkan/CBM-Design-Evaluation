@@ -1,4 +1,4 @@
-"""Extract and cache backbone features per (dataset, backbone, split)."""
+"""Extract and cache backbone features per (dataset, backbone, split), and of its auxiliary tap."""
 
 from __future__ import annotations
 
@@ -49,6 +49,24 @@ def load_features(dataset: ImageDataset, backbone, split: str, cache_dir: str | 
     path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(data, path)
     return FeatureSplit(**data)
+
+
+def load_aux_features(dataset: ImageDataset, backbone, split: str, cache_dir: str | Path,
+                      batch_size: int = 64, num_workers: int = 0) -> torch.Tensor:
+    """(N, aux_dim) features of the backbone's auxiliary tap (``Backbone.encode_aux``), rows aligned with
+    ``load_features``; cached per dataset, backbone and split. ``batch_size`` / ``num_workers`` only batch."""
+    key = {"dataset": dataset.cache_key(), "backbone": backbone.cache_key(), "split": split, "tap": "aux"}
+    path = Path(cache_dir) / "features" / dataset.name / f"{split}-aux-{stable_hash(key)}.pt"
+    if path.exists():
+        return torch.load(path)
+    # its own generator: a DataLoader draws a base seed even unshuffled, and this runs inside ``fit``,
+    # so a cold cache would otherwise shift the run's later random draws
+    loader = DataLoader(dataset.torch_split(split, backbone.transform()), batch_size=batch_size,
+                        num_workers=num_workers, shuffle=False, generator=torch.Generator())
+    out = torch.cat([backbone.encode_aux(batch["image"]).float().cpu() for batch in loader])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(out, path)
+    return out
 
 
 @torch.no_grad()

@@ -18,7 +18,7 @@ from torch.utils.data import Dataset as TorchDataset
 from .backbones.base import Backbone
 from .config import ExperimentConfig
 from .data.base import SPLITS, ImageDataset
-from .data.features import encode_split, load_features
+from .data.features import encode_split, load_aux_features, load_features
 from .data.parts import input_geometry, load_parts
 from .stages.common import match_names
 from .structures import Bag, ConceptSet, FeatureSplit, InstanceSplit, PartSplit
@@ -45,6 +45,7 @@ class Context:
         self._parts: dict[tuple, PartSplit | None] = {}
         self._encoder: nn.Module | None = None  # fine-tuned image encoder of the current run, if any
         self._images: dict[tuple[str, bool], TorchDataset] = {}
+        self._aux: dict[str, torch.Tensor] = {}
         self._workers = 0  # dataloader workers for encoding images with the fine-tuned encoder
         for bb in {id(b): b for b in (self.backbone, self.teacher) if b is not None}.values():
             bb.to(self.device)
@@ -93,6 +94,14 @@ class Context:
             feats = encode_split(self.image_split(name), self._encoder, self.device, num_workers=self._workers)
             self._splits[tuned] = dataclasses.replace(self._splits[key], features=feats, patch_features=None)
         return self._splits[tuned]
+
+    def aux_features(self, name: str) -> torch.Tensor:
+        """(N, aux_dim) frozen-backbone features of the auxiliary tap (training ``aux:``), cached on disk;
+        rows are aligned with ``split(name)``."""
+        if name not in self._aux:
+            dataset, split = self.source(name)
+            self._aux[name] = load_aux_features(dataset, self.backbone, split, self.cache_dir)
+        return self._aux[name]
 
     def image_split(self, name: str, augment: bool = False) -> TorchDataset:
         """Images of a split as a torch dataset of dicts (``image``, ``label``, ``index``, ...), with

@@ -3,7 +3,9 @@
 anchor: ../anchors/cub_koh2020_sequential.yaml
 mode: ofat
 seeds: [1, 2, 3]
-overrides: {stages.training.finetune: null}  # frozen arm; the anchor itself is the fine-tuned reproduction
+# frozen arm; the anchor itself is the fine-tuned reproduction. `aux` goes too: on a frozen backbone it
+# cannot change an independent / sequential model, so the training stage refuses it.
+overrides: {stages.training.finetune: null, stages.training.aux: null}
 factors:
   dataset.majority_vote: [mean]            # pipeline default vote: 93 concepts, labels differ from Koh's
   dataset.split_dir: [null]                # pipeline's own 90/10 train/val split

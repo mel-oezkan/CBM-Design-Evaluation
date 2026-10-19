@@ -44,7 +44,7 @@ per-config means and the effect of each design choice with confidence intervals.
 | Alignment | `clip`, `weights`, `dino`, `human`, `segment_clip` |
 | Generation | `scores`, `logits`, `embeddings` (CEM), `boc` |
 | Predictor | `sparse`, `dense`, `residual`, `mil` |
-| Training | `independent`, `sequential`, `joint` (+ `*_weighted`) |
+| Training | `independent`, `sequential`, `joint` (+ `*_weighted`); options `finetune:`, `aux:` |
 
 - **Datasets:** Waterbirds, CUB, MetaShift, synthetic
 - **Backbones:** OpenCLIP, DINOv2, ResNet, Inception-v3, toy
@@ -90,6 +90,7 @@ path: a fake Waterbirds folder, an untrained ResNet-18, and stub LLM/VLM clients
 The CUB loader and the Inception-v3 backbone have been run on the real dataset (frozen-backbone
 runs of the Koh et al. 2020 reproduction). **Not yet run against real data or pretrained
 weights:** OpenCLIP and DINOv2 feature extraction (including ViT patch tokens), the Waterbirds and
-MetaShift loaders, live Claude/ConceptNet calls, Grounding DINO scoring, and end-to-end backbone
-fine-tuning. Expect small fixes on first contact, and please open an issue when you hit one.
+MetaShift loaders, live Claude/ConceptNet calls, Grounding DINO scoring, end-to-end backbone
+fine-tuning, and the auxiliary Inception head (`aux:`). Expect small fixes on first contact, and
+please open an issue when you hit one.
 <!-- --8<-- [end:status] -->

@@ -3,6 +3,9 @@
 Backbones with ``trainable = True`` can also hand out a fine-tunable copy of their image encoder
 (``encoder()``), which a training stage with ``finetune:`` optimizes end to end; the backbone
 itself, and its cached features, stay frozen.
+
+Backbones with an ``aux_dim`` also expose an auxiliary feature tap on an intermediate layer
+(``encode_aux``), which a training stage with ``aux:`` uses for Koh et al.'s auxiliary concept head.
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ class Backbone(ABC):
     patch_grid: int | None = None  # side length of the patch grid, if patch features are available
     has_text: bool = False
     trainable: bool = False  # True if ``encoder()`` returns a fine-tunable copy (training ``finetune:``)
+    aux_dim: int | None = None  # width of the auxiliary feature tap (training ``aux:``), if there is one
 
     def __init__(self) -> None:
         self.device = torch.device("cpu")
@@ -32,9 +36,10 @@ class Backbone(ABC):
         """Transform for images seen while fine-tuning (augmentation); defaults to ``transform()``."""
         return self.transform()
 
-    def encoder(self) -> torch.nn.Module:
+    def encoder(self, aux: bool = False) -> torch.nn.Module:
         """A fresh, trainable copy of the image encoder: ``transform()``-ed images (B, ...) -> (B, D),
-        equal to ``encode_images`` in eval mode."""
+        equal to ``encode_images`` in eval mode. With ``aux`` it also carries the auxiliary tap:
+        ``forward_aux(images) -> ((B, D), (B, aux_dim))`` from one pass, equal to ``encode_aux`` in eval mode."""
         raise NotImplementedError(f"{type(self).__name__} cannot be fine-tuned (trainable = False)")
 
     def to(self, device: torch.device) -> "Backbone":
@@ -48,6 +53,10 @@ class Backbone(ABC):
     def encode_patches(self, images: torch.Tensor) -> torch.Tensor:
         """(B, ...) -> (B, P, D) patch features in the same space as ``encode_images``."""
         raise NotImplementedError(f"{type(self).__name__} does not provide patch features")
+
+    def encode_aux(self, images: torch.Tensor) -> torch.Tensor:
+        """(B, ...) -> (B, aux_dim) features of the auxiliary tap (see ``aux_dim``)."""
+        raise NotImplementedError(f"{type(self).__name__} has no auxiliary feature tap (aux_dim is None)")
 
     def encode_text(self, texts: list[str]) -> torch.Tensor:
         """list[str] -> (T, D) text embeddings in the image feature space."""

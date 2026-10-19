@@ -77,6 +77,7 @@ def test_unknown_majority_vote_is_refused(cub_root):
     ({"name": "independent_weighted", "epochs": 2}, {"name": "scores"}),
     ({"name": "sequential_weighted", "epochs": 2}, {"name": "logits"}),
     ({"name": "joint_weighted", "concept_weight": 1.12, "epochs": 2}, {"name": "logits"}),
+    ({"name": "joint_weighted", "concept_weight": 1.12, "epochs": 2, "aux": {"weight": 0.4}}, {"name": "logits"}),
 ])
 def test_koh2020_anchor_components_run_on_fake_cub(cub_root, tmp_path, training, generation):
     cfg = load_config("configs/anchors/cub_koh2020.yaml").with_overrides({

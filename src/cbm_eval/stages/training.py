@@ -7,6 +7,10 @@ With ``finetune: {...}`` a variant also trains the backbone end to end (Koh et a
 go through a trainable copy of the backbone's encoder, which is optimized together with the concept
 layer (the x -> c phase of independent / sequential) or with the concept layer and head (joint).
 The predictor of independent / sequential is then fitted on the fine-tuned encoder's features.
+
+With ``aux: {...}`` a variant also trains Koh et al.'s auxiliary concept head on the backbone's
+auxiliary tap (``Backbone.aux_dim``): every training step adds ``aux.weight`` x the step's loss on that
+head (see ``Aux``). On a frozen backbone this only changes a joint model, through the shared head.
 """
 
 from __future__ import annotations
@@ -66,6 +70,7 @@ class Batch:
     On frozen features, work that cannot change during a phase is done once over the whole split:
     ``xn`` holds ``x`` normalized by the concept layer, ``c`` a frozen layer's concept predictions.
     ``x`` (and ``xn``) are None once neither the concept layer nor the head reads them.
+    ``xa`` (N, D_aux) are auxiliary-tap features (training ``aux:``); only training batches carry them.
     """
 
     x: torch.Tensor | None
@@ -74,6 +79,7 @@ class Batch:
     bag: Bag | None = None
     xn: torch.Tensor | None = None
     c: torch.Tensor | None = None
+    xa: torch.Tensor | None = None
 
     def __len__(self) -> int:
         return len(self.y)
@@ -102,7 +108,7 @@ class Batch:
         return layer.logits_from_normalized(self.normalized(layer) if xn is None else xn)
 
     def without_x(self) -> "Batch":
-        return dataclasses.replace(self, x=None, xn=None)
+        return dataclasses.replace(self, x=None, xn=None, xa=None)
 
 
 OPTIMIZERS = ("adam", "sgd")
@@ -205,11 +211,56 @@ class Finetune:
         return OptimizerSpec(self.optimizer, self.lr, self.momentum, self.weight_decay).build(params)
 
 
+@dataclass(frozen=True)
+class Aux:
+    """Koh et al.'s auxiliary concept head (a training stage's ``aux:``).
+
+    A second x -> c linear map on the backbone's auxiliary tap (``Backbone.aux_dim``: Inception-v3's
+    ``AuxLogits`` convolutions on ``Mixed_6e``), its weights drawn from a normal truncated at +-2
+    ``init_std`` (None: PyTorch's default init). Every training step adds ``weight`` x the step's loss
+    on its concept logits: the concept loss, and in joint training also the task loss of those concepts
+    through the shared head (Koh et al.'s ``End2EndModel``). Validation and model selection read the
+    main branch only, and the head is discarded after training. Fine-tuning also trains the tap.
+    """
+
+    weight: float = 0.4
+    init_std: float | None = 0.001
+
+    def __post_init__(self):
+        if self.weight <= 0:
+            raise ValueError("`stages.training.aux.weight` must be positive; remove `aux:` to train without it")
+
+
+class _AuxHead(nn.Module):
+    """Auxiliary concept logits (N, K) from auxiliary-tap features (N, D_aux): a linear map on features
+    standardized with training statistics, as ``ConceptLayer`` standardizes its inputs."""
+
+    def __init__(self, in_dim: int, k: int, init_std: float | None):
+        super().__init__()
+        self.linear = nn.Linear(in_dim, k)
+        self.register_buffer("x_mean", torch.zeros(in_dim))
+        self.register_buffer("x_std", torch.ones(in_dim))
+        if init_std is not None:
+            nn.init.trunc_normal_(self.linear.weight, std=init_std, a=-2 * init_std, b=2 * init_std)
+
+    def fit_input_stats(self, xa: torch.Tensor) -> None:
+        self.x_mean.copy_(xa.mean(0))
+        self.x_std.copy_(xa.std(0).clamp_min(1e-6))
+
+    def forward(self, xa: torch.Tensor) -> torch.Tensor:
+        return self.linear((xa - self.x_mean) / self.x_std)
+
+
+def _params(module: nn.Module | None) -> list[nn.Parameter]:
+    return [] if module is None else list(module.parameters())
+
+
 class _ImageFeed:
     """Train / val images encoded on the fly by the trainable encoder, as ``Batch``es of features."""
 
-    def __init__(self, ctx, aligned: AlignedConcepts, encoder: nn.Module, spec: Finetune, device, seed: int):
-        self.encoder, self.spec, self.device = encoder, spec, device
+    def __init__(self, ctx, aligned: AlignedConcepts, encoder: nn.Module, spec: Finetune, device, seed: int,
+                 aux: bool = False):
+        self.encoder, self.spec, self.device, self.aux = encoder, spec, device, aux
         self.labels = {s: ctx.split(s).labels for s in ("train", "val")}
         self.targets = {s: aligned.targets(s) for s in ("train", "val")}
         g = torch.Generator().manual_seed(seed)
@@ -224,12 +275,19 @@ class _ImageFeed:
         }
 
     def batches(self, split: str, loader: str | None = None) -> Iterator[Batch]:
-        """Image batches -> feature batches; gradients reach the encoder in train mode."""
+        """Image batches -> feature batches; gradients reach the encoder in train mode. With ``aux``,
+        training batches also carry the encoder's auxiliary-tap features ``xa``."""
         t = self.targets[split]
         for item in self.loaders[loader or split]:
             idx = item["index"]
-            yield Batch(self.encoder(item["image"].to(self.device, non_blocking=True)).float(),
-                        self.labels[split][idx].to(self.device), None if t is None else t[idx].to(self.device))
+            images = item["image"].to(self.device, non_blocking=True)
+            if self.aux and (loader or split) == "train":
+                x, xa = self.encoder.forward_aux(images)
+                xa = xa.float()
+            else:
+                x, xa = self.encoder(images), None
+            yield Batch(x.float(), self.labels[split][idx].to(self.device),
+                        None if t is None else t[idx].to(self.device), xa=xa)
 
     @torch.no_grad()
     def encode(self, split: str) -> Batch:
@@ -289,12 +347,16 @@ def optimize_images(groups: list[ParamGroup], modules: list[nn.Module], feed: _I
 class _Base(Training):
     """Shared by every variant. ``optimizer`` (``adam``, or ``sgd`` with ``momentum``; both with
     ``weight_decay``) at ``lr`` fits the concept layer and every head that does not bring its own
-    (``PredictorHead.optimizer``, e.g. the sparse head's plain SGD)."""
+    (``PredictorHead.optimizer``, e.g. the sparse head's plain SGD). ``aux: {weight, init_std}`` adds
+    Koh et al.'s auxiliary concept head (see ``Aux``); it needs ``finetune:`` unless the variant passes
+    the auxiliary concepts through the head (``aux_reaches_head``, joint)."""
+
+    aux_reaches_head: bool = False  # True if the auxiliary concepts also train the head (joint)
 
     def __init__(self, epochs: int = 200, concept_epochs: int | None = None, batch_size: int = 256,
                  lr: float = 1e-3, patience: int = 10, concept_loss: str = "auto", device: str = "cpu",
                  finetune: dict | None = None, optimizer: str = "adam", momentum: float = 0.0,
-                 weight_decay: float = 0.0):
+                 weight_decay: float = 0.0, aux: dict | None = None):
         if concept_loss not in CONCEPT_LOSSES:
             raise ValueError(f"Unknown concept loss '{concept_loss}' (use one of {CONCEPT_LOSSES})")
         if optimizer not in OPTIMIZERS:
@@ -306,10 +368,19 @@ class _Base(Training):
         self.optimizer, self.momentum, self.weight_decay = optimizer, momentum, weight_decay
         self.concept_loss, self.device = concept_loss, device
         self.finetune = Finetune(**finetune) if finetune else None  # unknown keys raise TypeError
+        self.aux = Aux(**aux) if aux is not None else None  # `aux: {}` means the defaults, not "off"
+        if self.aux is not None and self.finetune is None and not self.aux_reaches_head:
+            raise ValueError(f"`stages.training.aux` would only train a discarded auxiliary concept layer: on a frozen "
+                             f"backbone '{type(self).__name__}' training is unchanged by it. Add `finetune:` or "
+                             "remove `aux:`")
 
     @property
     def trains_backbone(self) -> bool:
         return self.finetune is not None
+
+    @property
+    def needs_aux(self) -> bool:
+        return self.aux is not None
 
     @property
     def num_workers(self) -> int:
@@ -317,7 +388,22 @@ class _Base(Training):
 
     def fit(self, layer, head, aligned, ctx, encoder=None):
         device = resolve_device(self.device)
-        tr, va = (_batch(ctx, aligned, s).to(device) for s in ("train", "val"))
+        if self.aux is not None and not aligned.has_targets:
+            raise ValueError("`stages.training.aux` trains auxiliary concept predictions on concept targets; use an "
+                             "alignment with targets (e.g. `human`) or remove `aux:`")
+        if self.aux is not None and self.aux_reaches_head and (layer.represent_uses_x or head.uses_features):
+            raise ValueError("`stages.training.aux` passes the auxiliary concepts through the head alone, so it "
+                             "needs a generation and predictor that read only concepts (e.g. `generation: logits`, "
+                             "`predictor: dense`); remove `aux:` for this combination")
+        tr = _batch(ctx, aligned, "train", aux=self.aux is not None).to(device)
+        va = _batch(ctx, aligned, "val").to(device)
+        aux_head = None
+        if self.aux is not None:
+            if tr.bag is not None:
+                raise ValueError("`stages.training.aux` does not support instance bags; remove `instances:` or `aux:`")
+            # built here, after the layer and head, so that runs without `aux:` draw the same random numbers
+            aux_head = _AuxHead(tr.xa.shape[1], layer.n_concepts, self.aux.init_std).to(device)
+            aux_head.fit_input_stats(tr.xa)
         feed = None
         if self.finetune is not None:
             if encoder is None:
@@ -326,17 +412,18 @@ class _Base(Training):
             if tr.bag is not None:
                 raise ValueError("`stages.training.finetune` does not support instance bags; remove `instances:` "
                                  "or `finetune:`")
-            feed = _ImageFeed(ctx, aligned, encoder.to(device), self.finetune, device, ctx.seed)
+            feed = _ImageFeed(ctx, aligned, encoder.to(device), self.finetune, device, ctx.seed,
+                              aux=aux_head is not None)
         layer.to(device)
         head.to(device)
         try:
-            return self._fit(layer, head, aligned, tr, va, ctx.seed, feed)
+            return self._fit(layer, head, aligned, tr, va, ctx.seed, feed, aux_head)
         finally:
             layer.cpu()
             head.cpu()
 
     def _fit(self, layer: ConceptLayer, head: PredictorHead, aligned: AlignedConcepts, tr: Batch, va: Batch,
-             seed: int, feed: _ImageFeed | None = None) -> dict[str, float]:
+             seed: int, feed: _ImageFeed | None = None, aux_head: _AuxHead | None = None) -> dict[str, float]:
         raise NotImplementedError
 
     def _prepare(self, layer: ConceptLayer, aligned: AlignedConcepts, tr: Batch) -> None:
@@ -351,27 +438,45 @@ class _Base(Training):
         bags are normalized per minibatch instead, since a second copy of a patch bag can run to gigabytes."""
         return [b if b.x.dim() == 3 else dataclasses.replace(b, xn=layer.normalize(b.x)) for b in batches]
 
-    def _concept_loss(self, layer: ConceptLayer, b: Batch) -> torch.Tensor:
-        return concept_loss_from_logits(b.concept_logits(layer), b.t, b.bag, self.concept_loss, layer.target_type)
+    def _concept_loss(self, layer: ConceptLayer, b: Batch, logits: torch.Tensor | None = None) -> torch.Tensor:
+        """Concept loss of a batch; ``logits`` default to ``b.concept_logits(layer)`` (the auxiliary head
+        passes its own)."""
+        logits = b.concept_logits(layer) if logits is None else logits
+        return concept_loss_from_logits(logits, b.t, b.bag, self.concept_loss, layer.target_type)
+
+    def _aux_loss(self, aux_head: _AuxHead, layer: ConceptLayer, head: PredictorHead | None, b: Batch) -> torch.Tensor:
+        """The auxiliary head's loss on a training batch, before ``aux.weight``: its concept loss. Joint
+        training adds the task loss of its concepts through the shared head."""
+        return self._concept_loss(layer, b, aux_head(b.xa))
+
+    def _aux_term(self, aux_head: _AuxHead | None, layer: ConceptLayer, head: PredictorHead | None,
+                  b: Batch) -> torch.Tensor | float:
+        """``aux.weight`` x ``_aux_loss`` on batches that carry auxiliary features (training batches); else 0."""
+        if aux_head is None or b.xa is None:
+            return 0.0
+        return self.aux.weight * self._aux_loss(aux_head, layer, head, b)
 
     def _task_loss(self, logits: torch.Tensor, b: Batch) -> torch.Tensor:
         """Class logits (N, C) -> scalar task loss. The one place every variant computes it; override
         it in a subclass (registered under a new name) to try another task loss."""
         return F.cross_entropy(logits, b.y)
 
-    def _fit_concepts(self, layer, aligned, tr: Batch, va: Batch, seed,
-                      feed: _ImageFeed | None = None) -> dict[str, float]:
+    def _fit_concepts(self, layer, aligned, tr: Batch, va: Batch, seed, feed: _ImageFeed | None = None,
+                      aux_head: _AuxHead | None = None) -> dict[str, float]:
+        group = (layer.concept_params() + _params(aux_head), self._optimizer())
+
+        def loss(b: Batch) -> torch.Tensor:
+            return self._concept_loss(layer, b) + self._aux_term(aux_head, layer, None, b)
+
         if feed is not None:  # x -> c end to end: encoder + concept layer on the concept loss
             if not aligned.has_targets:
                 raise ValueError("`finetune:` with independent / sequential training needs concept targets "
                                  "(an alignment with targets, e.g. `human`); use `joint` to fine-tune without")
-            log = optimize_images([(layer.concept_params(), self._optimizer())], [layer], feed,
-                                  lambda b: self._concept_loss(layer, b), lambda b: self._concept_loss(layer, b))
+            log = optimize_images([group], [layer], feed, loss, loss)
             return {"finetune_epochs": log["epochs"], "concept_val_loss": log["val_loss"]}
         if not aligned.has_targets or layer.frozen:
             return {}
-        log = optimize([(layer.concept_params(), self._optimizer())], [layer], len(tr),
-                       lambda idx: self._concept_loss(layer, tr[idx]),
+        log = optimize([group], [layer], len(tr), lambda idx: loss(tr[idx]),
                        lambda: float(self._concept_loss(layer, va)),
                        self.concept_epochs, self.batch_size, self.patience, seed)
         return {"concept_epochs": log["epochs"], "concept_val_loss": log["val_loss"]}
@@ -404,19 +509,20 @@ class _Base(Training):
         return out
 
 
-def _batch(ctx, aligned: AlignedConcepts, split: str) -> Batch:
+def _batch(ctx, aligned: AlignedConcepts, split: str, aux: bool = False) -> Batch:
     x, bag = ctx.inputs(split)
-    return Batch(x.float(), ctx.split(split).labels, aligned.targets(split), bag)
+    return Batch(x.float(), ctx.split(split).labels, aligned.targets(split), bag,
+                 xa=ctx.aux_features(split).float() if aux else None)
 
 
 @TRAINING.register("sequential")
 class Sequential(_Base):
     """Fit concepts to targets, freeze, then fit the predictor on predicted concepts."""
 
-    def _fit(self, layer, head, aligned, tr, va, seed, feed=None):
+    def _fit(self, layer, head, aligned, tr, va, seed, feed=None, aux_head=None):
         self._prepare(layer, aligned, tr)
         tr, va = self._normalized(layer, tr, va)
-        log = self._fit_concepts(layer, aligned, tr, va, seed, feed)
+        log = self._fit_concepts(layer, aligned, tr, va, seed, feed, aux_head)
         if feed is not None:  # the head sees the fine-tuned encoder's features
             tr, va = self._normalized(layer, feed.encode("train"), feed.encode("val"))
         tr, va = self._frozen_concepts(layer, tr), self._frozen_concepts(layer, va)
@@ -442,10 +548,10 @@ class Independent(_Base):
             raise RuntimeError("independent training needs concept targets (not available with this alignment)")
         return super().fit(layer, head, aligned, ctx, encoder)
 
-    def _fit(self, layer, head, aligned, tr, va, seed, feed=None):
+    def _fit(self, layer, head, aligned, tr, va, seed, feed=None, aux_head=None):
         self._prepare(layer, aligned, tr)
         tr, va = self._normalized(layer, tr, va)
-        log = self._fit_concepts(layer, aligned, tr, va, seed, feed)
+        log = self._fit_concepts(layer, aligned, tr, va, seed, feed, aux_head)
         if feed is not None:
             tr, va = self._normalized(layer, feed.encode("train"), feed.encode("val"))
         return log | self._fit_head(layer, head, tr, va, lambda b: layer.represent(b.t, b.x), seed + 1)
@@ -453,13 +559,26 @@ class Independent(_Base):
 
 @TRAINING.register("joint")
 class Joint(_Base):
-    """End-to-end: task loss + ``concept_weight`` x concept loss (when targets exist)."""
+    """End-to-end: task loss + ``concept_weight`` x concept loss (when targets exist). With ``aux:``
+    the auxiliary concepts also go through the head, so ``aux`` changes the head on a frozen backbone too."""
+
+    aux_reaches_head = True
 
     def __init__(self, concept_weight: float = 1.0, **kw):
         super().__init__(**kw)
         self.concept_weight = concept_weight
 
-    def _fit(self, layer, head, aligned, tr, va, seed, feed=None):
+    def _aux_loss(self, aux_head, layer, head, b):
+        """The auxiliary concepts go through the head as ``activate``-d logits. They skip the layer's
+        ``logits_from_normalized``, so a generation that changes its scores there needs a matching
+        change here (none does; with targets, ``c_mean`` / ``c_std`` stay 0 / 1)."""
+        logits = aux_head(b.xa)
+        loss = self._task_loss(head(layer.represent(layer.activate(logits), None), None, b.bag), b)
+        if self.concept_weight > 0:
+            loss = loss + self.concept_weight * self._concept_loss(layer, b, logits)
+        return loss
+
+    def _fit(self, layer, head, aligned, tr, va, seed, feed=None, aux_head=None):
         self._prepare(layer, aligned, tr)
         tr, va = self._normalized(layer, tr, va)
         use_c = aligned.has_targets and self.concept_weight > 0
@@ -470,9 +589,9 @@ class Joint(_Base):
             loss = self._task_loss(head(rep, xn, b.bag), b)
             if use_c:
                 loss = loss + self.concept_weight * self._concept_loss(layer, b)
-            return loss
+            return loss + self._aux_term(aux_head, layer, head, b)
 
-        groups = [(layer.concept_params() + layer.rep_params(), self._optimizer()),
+        groups = [(layer.concept_params() + layer.rep_params() + _params(aux_head), self._optimizer()),
                   self._head_group(head, list(head.parameters()))]
         if feed is not None:  # encoder, concept layer and head together, on images
             log = optimize_images(groups, [layer, head], feed, lambda b: total(b) + head.penalty(), total,
@@ -505,8 +624,9 @@ class _ImbalanceWeightedConcepts:
             pos = tr.t.float().mean(0)
             self.concept_weights = (1 - pos) / pos.clamp_min(1e-6)
 
-    def _concept_loss(self, layer, b):
-        per = F.binary_cross_entropy_with_logits(b.concept_logits(layer), b.t, reduction="none")
+    def _concept_loss(self, layer, b, logits=None):
+        logits = b.concept_logits(layer) if logits is None else logits
+        per = F.binary_cross_entropy_with_logits(logits, b.t, reduction="none")
         return (per * self.concept_weights.to(per)).mean(-1).mean()
 
 
