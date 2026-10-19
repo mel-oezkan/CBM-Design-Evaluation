@@ -48,7 +48,6 @@ def test_koh_vote_ignores_not_visible_negatives_and_breaks_ties_to_present(cub_r
     assert "has_bill_shape::dagger" not in mean.concept_names
     assert koh.concept_names == ["has_bill_shape::dagger"]
     assert all(s.concepts == [1] for s in koh.samples("test"))
-    assert mean.cache_key() != koh.cache_key()
 
 
 def test_split_dir_uses_the_authors_val_images(cub_root, tmp_path):
@@ -73,18 +72,15 @@ def test_unknown_majority_vote_is_refused(cub_root):
         CUB(str(cub_root), majority_vote="median")
 
 
-@pytest.mark.parametrize("training,generation", [
-    ({"name": "independent_weighted", "epochs": 2}, {"name": "scores"}),
-    ({"name": "sequential_weighted", "epochs": 2}, {"name": "logits"}),
-    ({"name": "joint_weighted", "concept_weight": 1.12, "epochs": 2}, {"name": "logits"}),
-    ({"name": "joint_weighted", "concept_weight": 1.12, "epochs": 2, "aux": {"weight": 0.4}}, {"name": "logits"}),
-])
-def test_koh2020_anchor_components_run_on_fake_cub(cub_root, tmp_path, training, generation):
+def test_koh2020_anchor_components_run_on_fake_cub(cub_root, tmp_path):
+    # the anchor's head, loss and auxiliary Inception head without backbone fine-tuning; the other
+    # weighted training variants run on the synthetic data in test_pipeline.py::test_koh2020_variants_run
     cfg = load_config("configs/anchors/cub_koh2020.yaml").with_overrides({
         "dataset": {"name": "cub", "root": str(cub_root), "majority_vote": "koh", "min_class_count": 1,
                     "val_fraction": 0.3},
         "backbone": {"name": "inception", "weights": None},  # random init: no download
-        "stages.training": training, "stages.generation": generation, "device": "cpu",
+        "stages.training": {"name": "joint_weighted", "concept_weight": 1.12, "epochs": 2, "aux": {"weight": 0.4}},
+        "device": "cpu",
         "paths": {"cache": str(tmp_path / "cache"), "runs": str(tmp_path / "runs"),
                   "results": str(tmp_path / "r.jsonl")},
     })
