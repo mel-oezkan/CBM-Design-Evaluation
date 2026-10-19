@@ -88,6 +88,7 @@ nav:
       - "Example: Koh et al. 2020": koh2020_reproduction.md
   - Extending:
       - Contributing: contributing.md
+      - Filing issues: issues.md
   - API reference:
       - Core: api/core.md
       - Stage interfaces: api/stages.md

@@ -175,7 +175,10 @@ Every problem you find that the current task doesn't fix becomes a GitHub issue 
 (`gh issue create`): a bug, a crashing variant combination, a reproducibility gap, a cache-key
 hole, or a doc that contradicts the code. Mentioning it in a reply or a commit message is not
 enough. First check `gh issue list --search` for an existing issue and comment there instead of
-duplicating it. An issue states:
+duplicating it. Before filing, read `docs/issues.md`: it sets the title, sections, labels,
+evidence rules and what a session must not do. Every issue opens with a short abstract and a
+key-facts table, shows the problem as a diagram or table before explaining it, and is written in
+Simplified Technical English (short active sentences, one name per thing). In short, an issue states:
 
 - what goes wrong, with a minimal reproduction (a config or a few lines on the synthetic dataset and `toy` backbone);
 - where it happens (`file:line`) and, if known, the cause;
@@ -183,6 +186,7 @@ duplicating it. An issue states:
   results file (see the reproducibility invariants above), so say which runs are affected.
 
 Then link the issue in your reply to the user, and in the PR or commit where the problem came up.
+Also add it to the issue map, and mark closed issues there (`docs/issues.md`, *Update the issue map*).
 
 ## Style
 
