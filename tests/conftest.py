@@ -1,8 +1,15 @@
+import pickle
+
 import numpy as np
 import pytest
+import torch
 from PIL import Image
+from torchvision import transforms as T
 
+from cbm_eval.backbones.base import Backbone
 from cbm_eval.config import ExperimentConfig
+from cbm_eval.data.synthetic import toy_latent
+from cbm_eval.registry import BACKBONES
 
 SMALL_DATA = {"name": "synthetic", "sizes": {"train": 400, "val": 200, "test": 300}}
 
@@ -70,3 +77,73 @@ def cub_root(tmp_path):
     (root / "parts" / "parts.txt").write_text("\n".join(f"{i + 1} {p}" for i, p in enumerate(_PARTS)))
     (root / "parts" / "part_locs.txt").write_text("\n".join(locs))
     return root
+
+
+# -- tiny fake CIFAR folders in the python-pickle layout, shared by the CIFAR and cache-key tests ----
+
+CIFAR10_CLASSES = ["airplane", "automobile", "bird", "cat", "deer", "dog", "frog", "horse", "ship", "truck"]
+
+
+def _cifar_batch(path, n, label_key, n_classes, seed, **extra):
+    rng = np.random.default_rng(seed)
+    batch = {"data": rng.integers(0, 256, (n, 3072), dtype=np.uint8),
+             label_key: [int(c) for c in rng.integers(0, n_classes, n)], **extra}
+    with open(path, "wb") as f:
+        pickle.dump(batch, f, protocol=2)  # the files are python 2 pickles of numpy arrays
+
+
+@pytest.fixture
+def cifar10_root(tmp_path):
+    root = tmp_path / "cifar-10-batches-py"
+    root.mkdir()
+    for i in range(1, 6):
+        _cifar_batch(root / f"data_batch_{i}", 8, "labels", 10, i)
+    _cifar_batch(root / "test_batch", 10, "labels", 10, 0)
+    with open(root / "batches.meta", "wb") as f:
+        pickle.dump({"label_names": CIFAR10_CLASSES, "num_cases_per_batch": 8}, f, protocol=2)
+    return root
+
+
+@pytest.fixture
+def cifar100_root(tmp_path):
+    root = tmp_path / "cifar-100-python"
+    root.mkdir()
+    for name, n, seed in (("train", 40, 1), ("test", 10, 0)):
+        _cifar_batch(root / name, n, "fine_labels", 4, seed, coarse_labels=[0] * n)
+    with open(root / "meta", "wb") as f:
+        pickle.dump({"fine_label_names": ["apple", "aquarium_fish", "maple_tree", "rose"],
+                     "coarse_label_names": ["things"]}, f, protocol=2)
+    return root
+
+
+# -- a backbone for image files and in-memory images, with a text tower ------------------------------
+
+
+@BACKBONES.register("test_pixels")
+class PixelBackbone(Backbone):
+    """Tiny image encoder with a text tower, so CLIP-based stages (concept-guided segmentation, the
+    label-free anchors) run without CLIP."""
+
+    has_text = True
+    dim = 8
+
+    def __init__(self):
+        super().__init__()
+        self.proj = torch.randn(3 * 4 * 4, self.dim, generator=torch.Generator().manual_seed(0))
+        self.patch_grid = 4
+
+    def cache_key(self):
+        return {"name": "test_pixels"}
+
+    def transform(self):
+        return T.Compose([T.Resize((16, 16)), T.ToTensor()])
+
+    def encode_patches(self, images):
+        p = images.unfold(2, 4, 4).unfold(3, 4, 4)  # (B, 3, 4, 4, 4, 4)
+        return p.permute(0, 2, 3, 1, 4, 5).flatten(3).flatten(1, 2) @ self.proj
+
+    def encode_images(self, images):
+        return self.encode_patches(images).mean(1)
+
+    def encode_text(self, texts):
+        return torch.stack([toy_latent(t, self.dim) for t in texts])

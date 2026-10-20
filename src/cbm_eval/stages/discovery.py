@@ -63,7 +63,8 @@ class DatasetDiscovery(Discovery):
     def discover(self, ctx):
         names = ctx.dataset.concept_names
         if not names:
-            raise RuntimeError(f"Dataset '{ctx.dataset.name}' has no annotated concepts")
+            raise RuntimeError(f"Dataset '{ctx.dataset.name}' has no annotated concepts; set `stages.discovery` "
+                               "to a label-free variant such as {name: llm}")
         names = list(dict.fromkeys(names + self.extra))
         return ConceptSet(names=names, meta=[{"source": "dataset"} for _ in names])
 

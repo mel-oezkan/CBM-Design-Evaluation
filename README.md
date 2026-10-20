@@ -46,7 +46,7 @@ per-config means and the effect of each design choice with confidence intervals.
 | Predictor | `sparse`, `dense`, `residual`, `mil` |
 | Training | `independent`, `sequential`, `joint` (+ `*_weighted`); options `finetune:`, `aux:` |
 
-- **Datasets:** Waterbirds, CUB, MetaShift, synthetic
+- **Datasets:** Waterbirds, CUB, MetaShift, CIFAR-10 / CIFAR-100, synthetic
 - **Backbones:** OpenCLIP, DINOv2, ResNet, Inception-v3, toy
 - **Evaluation:** distribution shift (worst-group accuracy), concept accuracy, leakage,
   localization, part localization, faithfulness
@@ -91,8 +91,8 @@ path: a fake Waterbirds folder, an untrained ResNet-18, and stub LLM/VLM clients
 
 The CUB loader and the Inception-v3 backbone have been run on the real dataset (frozen-backbone
 runs of the Koh et al. 2020 reproduction). **Not yet run against real data or pretrained
-weights:** OpenCLIP and DINOv2 feature extraction (including ViT patch tokens), the Waterbirds and
-MetaShift loaders, live Claude/ConceptNet calls, Grounding DINO scoring, end-to-end backbone
+weights:** OpenCLIP and DINOv2 feature extraction (including ViT patch tokens), the Waterbirds,
+MetaShift and CIFAR loaders, live Claude/ConceptNet calls, Grounding DINO scoring, end-to-end backbone
 fine-tuning, and the auxiliary Inception head (`aux:`). Expect small fixes on first contact, and
 please open an issue when you hit one.
 <!-- --8<-- [end:status] -->

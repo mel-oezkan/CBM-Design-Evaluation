@@ -188,6 +188,7 @@ The other anchors in `configs/anchors/` target real datasets:
 |---|---|---|
 | `waterbirds_lfcbm.yaml` | Label-free-CBM style on Waterbirds: Claude-generated concepts, CLIP alignment | Waterbirds, `clip` + `llm` extras, Claude credentials |
 | `metashift_lfcbm.yaml` | The same design on MetaShift | MetaShift, `clip` + `llm` extras, Claude credentials |
+| `cifar10_lfcbm.yaml`, `cifar100_lfcbm.yaml` | Label-free CBM on CIFAR, following the paper's CIFAR setup (gaps in the file header) | CIFAR, `clip` + `llm` extras, Claude credentials |
 | `cub_human.yaml` | Classic CBM on CUB: annotated attributes, human supervision, keypoint localization | CUB, `clip` extra |
 | `waterbirds_segmil.yaml`, `cub_segmil.yaml` | SEG-MIL-CBM: concept-guided segments as instance bags | The dataset, `clip` + `hf` + `llm` extras, Claude credentials; a GPU helps |
 | `cub_koh2020_frozen*.yaml` | Reproduction of Koh et al. 2020 following the authors' code, Inception-v3 frozen | CUB and the authors' split; a GPU for feature extraction |
