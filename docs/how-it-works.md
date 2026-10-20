@@ -169,8 +169,9 @@ Each evaluator returns its numbers without a prefix, and the pipeline adds the e
 The run writes two things:
 
 - a folder `runs/synthetic/<run_id>-s0/` with the config, the concept list, the weights, the
-  cached concept predictions, the concept trace and the training log, so that `cbm-eval evaluate`
-  can score it again later without retraining;
+  cached concept predictions, the concept trace, the training log and the per-epoch history
+  (`history.jsonl`, see [Training](training.md#epoch-history-and-live-tracking)), so that
+  `cbm-eval evaluate` can score it again later without retraining;
 - one row in `results/synthetic.jsonl` with the `run_id` (a hash of the config without the seed),
   the seed, the git commit, a `factor` entry naming the variant of every stage, and every metric.
 

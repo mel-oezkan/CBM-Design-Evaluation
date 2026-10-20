@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import copy
 import dataclasses
+import time
 from dataclasses import dataclass
 from typing import Callable, Iterator
 
@@ -184,21 +185,28 @@ def _optimizers(groups: list[ParamGroup]) -> list[torch.optim.Optimizer]:
 class _Selection:
     """Model selection over epochs: keeps the weights of the best epoch by ``select`` and asks to stop
     after ``patience`` epochs without improvement. ``val_loss`` improves by more than 1e-5; the
-    accuracies improve when strictly higher (as Koh et al.'s ``best_val_acc < acc``)."""
+    accuracies improve when strictly higher (as Koh et al.'s ``best_val_acc < acc``). ``log`` (e.g.
+    ``History.phase``) receives every epoch's numbers and whether it is the best so far."""
 
-    def __init__(self, select: str, patience: int, modules: list[nn.Module], to_cpu: bool = False):
-        self.select, self.patience, self.modules, self.to_cpu = select, patience, modules, to_cpu
+    def __init__(self, select: str, patience: int, modules: list[nn.Module], to_cpu: bool = False,
+                 log: Callable[..., None] | None = None):
+        self.select, self.patience, self.modules, self.to_cpu, self.log = select, patience, modules, to_cpu, log
         self.best = float("inf") if select == "val_loss" else float("-inf")
         self.state, self.bad, self.best_epoch, self.val_loss = None, 0, 0, float("nan")
 
-    def update(self, epoch: int, train_acc: float | None, val: tuple[float, float | None] | None) -> bool:
-        """Record an epoch's running training accuracy and (validation loss, accuracy); True to stop."""
+    def update(self, epoch: int, train_acc: float | None, val: tuple[float, float | None] | None,
+               **extra: float) -> bool:
+        """Record an epoch's running training accuracy and (validation loss, accuracy); True to stop.
+        ``extra`` (training loss, seconds, learning rates) only goes to ``log``."""
         val_loss, val_acc = val if val is not None else (float("nan"), None)
         if self.select == "val_loss":
             score, better = val_loss, val_loss < self.best - 1e-5
         else:
             score = train_acc if self.select == "train_acc" else val_acc
             better = score > self.best
+        if self.log is not None:
+            self.log(epoch=epoch, train_acc=train_acc, val_loss=None if val is None else val_loss, val_acc=val_acc,
+                     best=bool(better), **extra)
         if better:
             self.best, self.bad, self.best_epoch, self.val_loss = score, 0, epoch, val_loss
             self.state = [{k: t.detach().cpu().clone() for k, t in m.state_dict().items()} if self.to_cpu
@@ -222,29 +230,36 @@ def _acc_flags(select: str) -> tuple[bool, bool]:
     return select == "train_acc", select == "val_acc"
 
 
+def _lr(opt: torch.optim.Optimizer) -> float:
+    return opt.param_groups[0]["lr"]
+
+
 def optimize(groups: list[ParamGroup], modules: list[nn.Module], n: int,
              train_step: Callable[[torch.Tensor], Step], val_step: Callable[[], Step] | None,
              epochs: int, batch_size: int, patience: int, seed: int,
              after_step: Callable[[], None] | None = None, select: str = "val_loss",
-             drop_last: bool = False) -> dict[str, float]:
+             drop_last: bool = False, log: Callable[..., None] | None = None) -> dict[str, float]:
     """Minibatch training over ``n`` examples (``train_step(idx)``), with model selection by ``select``
     (``val_step()`` on the validation split; None when it is trained on too); restores the best
-    weights. ``drop_last`` skips each epoch's last, incomplete minibatch."""
+    weights. ``drop_last`` skips each epoch's last, incomplete minibatch. ``log`` receives each
+    epoch's numbers (see ``_Selection``)."""
     opts = _optimizers(groups)
     if not opts:
         return {"epochs": 0, "val_loss": float(val_step()[0]) if val_step is not None else float("nan")}
     g = torch.Generator().manual_seed(seed)
-    sel = _Selection(select, patience, modules)
+    sel = _Selection(select, patience, modules, log=log)
     epoch = 0
     for epoch in range(1, epochs + 1):
+        start = time.perf_counter()
         for m in modules:
             m.train()
         batches = torch.randperm(n, generator=g).split(batch_size)
         if drop_last and len(batches) > 1 and len(batches[-1]) < batch_size:
             batches = batches[:-1]
-        correct, seen = 0.0, 0
+        correct, seen, loss_sum, n_seen = 0.0, 0, torch.zeros(()), 0
         for idx in batches:
             loss, acc = train_step(idx)
+            loss_sum, n_seen = loss_sum.to(loss.device) + loss.detach() * len(idx), n_seen + len(idx)
             for opt in opts:
                 opt.zero_grad()
             loss.backward()
@@ -258,7 +273,8 @@ def optimize(groups: list[ParamGroup], modules: list[nn.Module], n: int,
             m.eval()
         with torch.no_grad():
             val = None if val_step is None else tuple(None if v is None else float(v) for v in val_step())
-        if sel.update(epoch, correct / seen if seen else None, val):
+        if sel.update(epoch, correct / seen if seen else None, val, train_loss=float(loss_sum) / max(n_seen, 1),
+                      lr=_lr(opts[0]), seconds=time.perf_counter() - start):
             break
     return sel.finish(epoch)
 
@@ -404,23 +420,26 @@ class _ImageFeed:
 
 def optimize_images(groups: list[ParamGroup], modules: list[nn.Module], feed: _ImageFeed,
                     train_step: Callable[[Batch], Step], val_step: Callable[[Batch], Step],
-                    after_step: Callable[[], None] | None = None, select: str = "val_loss") -> dict[str, float]:
+                    after_step: Callable[[], None] | None = None, select: str = "val_loss",
+                    log: Callable[..., None] | None = None) -> dict[str, float]:
     """``optimize`` over image batches, with the encoder fine-tuned alongside ``modules``."""
     spec, encoder = feed.spec, feed.encoder
     opts = _optimizers(groups)
     enc_opt = spec.make_optimizer([p for p in encoder.parameters() if p.requires_grad])
     modules = [encoder] + modules
-    sel = _Selection(select, spec.patience, modules, to_cpu=True)
+    sel = _Selection(select, spec.patience, modules, to_cpu=True, log=log)
     epoch = 0
     for epoch in range(1, spec.epochs + 1):
+        start = time.perf_counter()
         if spec.lr_step:
             for g in enc_opt.param_groups:
                 g["lr"] = spec.lr * spec.lr_gamma ** ((epoch - 1) // spec.lr_step)
         for m in modules:
             m.train()
-        correct, seen = 0.0, 0
+        correct, seen, loss_sum, n_seen = 0.0, 0, torch.zeros(()), 0
         for b in feed.batches("train"):
             loss, acc = train_step(b)
+            loss_sum, n_seen = loss_sum.to(loss.device) + loss.detach() * len(b), n_seen + len(b)
             for opt in opts + [enc_opt]:
                 opt.zero_grad()
             loss.backward()
@@ -433,13 +452,15 @@ def optimize_images(groups: list[ParamGroup], modules: list[nn.Module], feed: _I
         for m in modules:
             m.eval()
         with torch.no_grad():
-            total, hits, n = 0.0, 0.0, 0
+            total, hits, n, has_acc = 0.0, 0.0, 0, False
             for b in feed.batches("val"):
                 loss, acc = val_step(b)
                 total, n = total + float(loss) * len(b), n + len(b)
-                hits += 0.0 if acc is None else float(acc) * len(b)
-            val = (total / max(n, 1), hits / max(n, 1) if select == "val_acc" else None)
-        if sel.update(epoch, correct / seen if seen else None, val):
+                if acc is not None:
+                    hits, has_acc = hits + float(acc) * len(b), True
+            val = (total / max(n, 1), hits / max(n, 1) if has_acc else None)
+        if sel.update(epoch, correct / seen if seen else None, val, train_loss=float(loss_sum) / max(n_seen, 1),
+                      lr=_lr(opts[0]) if opts else None, encoder_lr=_lr(enc_opt), seconds=time.perf_counter() - start):
             break
     log = sel.finish(epoch)
     for m in modules:
@@ -535,6 +556,7 @@ class _Base(Training):
 
     def fit(self, layer, head, aligned, ctx, encoder=None):
         device = resolve_device(self.device)
+        self._history = ctx.history  # each phase reports its epochs here (see ``History``)
         if self.aux is not None and not aligned.has_targets:
             raise ValueError("`stages.training.aux` trains auxiliary concept predictions on concept targets; use an "
                              "alignment with targets (e.g. `human`) or remove `aux:`")
@@ -619,6 +641,8 @@ class _Base(Training):
         if (train_acc or val_acc) and aligned.has_targets and (aligned.target_type != "binary" or tr.bag is not None):
             raise ValueError(f"`stages.training.concept_select: {self.concept_select}` measures the accuracy of binary "
                              "image-level concept predictions; use `val_loss` for this alignment or instance bags")
+        # concept accuracy is defined for binary image-level targets; the history records it even if unselected
+        acc = aligned.has_targets and aligned.target_type == "binary" and tr.bag is None
 
         def step(b: Batch, want_acc: bool, train: bool = False) -> Step:
             logits = b.concept_logits(layer)
@@ -633,18 +657,18 @@ class _Base(Training):
             if not aligned.has_targets:
                 raise ValueError("`finetune:` with independent / sequential training needs concept targets "
                                  "(an alignment with targets, e.g. `human`); use `joint` to fine-tune without")
-            log = optimize_images([group], [layer], feed, lambda b: step(b, train_acc, True), lambda b: step(b, val_acc),
-                                  select=self.concept_select)
+            log = optimize_images([group], [layer], feed, lambda b: step(b, acc, True), lambda b: step(b, acc),
+                                  select=self.concept_select, log=self._history.phase("concept"))
             return {"finetune_epochs": log["epochs"], "concept_val_loss": log["val_loss"]} | _extra(log, "concept")
         if not aligned.has_targets or layer.frozen:
             return {}
         if self.concept_train_on_val:
             tr, va = Batch.cat(tr, va), None
         g = torch.Generator().manual_seed(seed + 1_000)  # draws the augmented view of each image
-        log = optimize([group], [layer], len(tr), lambda idx: step(tr[idx].view(layer, g), train_acc, True),
-                       None if va is None else lambda: step(va, val_acc),
+        log = optimize([group], [layer], len(tr), lambda idx: step(tr[idx].view(layer, g), acc, True),
+                       None if va is None else lambda: step(va, acc),
                        self.concept_epochs, self.batch_size, self.patience, seed,
-                       select=self.concept_select, drop_last=self.drop_last)
+                       select=self.concept_select, drop_last=self.drop_last, log=self._history.phase("concept"))
         return {"concept_epochs": log["epochs"], "concept_val_loss": log["val_loss"]} | _extra(log, "concept")
 
     def _optimizer(self, lr: float | None = None, weight_decay: float | None = None) -> OptimizerSpec:
@@ -666,22 +690,21 @@ class _Base(Training):
             tr, va = (dataclasses.replace(b, xa=None, views=None) for b in (tr, va))
         if self.train_on_val:
             tr, va = Batch.cat(tr, va), None
-        train_acc, val_acc = _acc_flags(self.select)
 
-        def task_step(b: Batch, want_acc: bool) -> Step:
+        def task_step(b: Batch) -> Step:
             logits = head(rep_fn(b), b.normalized(layer) if head.uses_features else None, b.bag)
-            return self._task_loss(logits, b), class_accuracy(logits, b.y) if want_acc else None
+            return self._task_loss(logits, b), class_accuracy(logits, b.y)
 
         def train_step(idx) -> Step:
-            loss, acc = task_step(tr[idx], train_acc)
+            loss, acc = task_step(tr[idx])
             return loss + head.penalty(), acc
 
         for i, phase in enumerate(head.phases()):
             groups = [self._head_group(head, phase)] + ([(layer.rep_params(), self._optimizer())] if i == 0 else [])
             log = optimize(groups, [layer, head], len(tr), train_step,
-                           None if va is None else lambda: task_step(va, val_acc), self.epochs, self.batch_size,
+                           None if va is None else lambda: task_step(va), self.epochs, self.batch_size,
                            self.patience, seed + i, after_step=head.proximal_step, select=self.select,
-                           drop_last=self.drop_last)
+                           drop_last=self.drop_last, log=self._history.phase(f"head_phase{i}"))
             out[f"head_phase{i}_epochs"] = log["epochs"]
             out["head_val_loss"] = log["val_loss"]
             out |= _extra(log, "head")
@@ -789,9 +812,8 @@ class Joint(_Base):
         self._prepare(layer, aligned, tr)
         tr, va = self._normalized(layer, tr, va)
         use_c = aligned.has_targets and self.concept_weight > 0
-        train_acc, val_acc = _acc_flags(self.select)
 
-        def total(b: Batch, want_acc: bool, train: bool = False) -> Step:
+        def total(b: Batch, train: bool = False) -> Step:
             xn = b.normalized(layer) if head.uses_features else None
             c_logits = b.concept_logits(layer, xn)
             rep = layer.represent(layer.activate(c_logits), b.x)  # = layer(b.x)[1]
@@ -804,26 +826,26 @@ class Joint(_Base):
                 loss = loss + self._aux_term(aux_head, layer, head, b)
             if self.normalize_loss:  # Koh et al. divide the whole loss, auxiliary terms included
                 loss = loss / (1 + (self.concept_weight if use_c else 0.0))
-            return loss, class_accuracy(logits, b.y) if want_acc else None
+            return loss, class_accuracy(logits, b.y)
 
         def train_step(b: Batch) -> Step:
-            loss, acc = total(b, train_acc, train=True)
+            loss, acc = total(b, train=True)
             return loss + head.penalty(), acc
 
         groups = [(layer.concept_params() + layer.rep_params() + _params(aux_head), self._optimizer()),
                   self._head_group(head, list(head.parameters()))]
         if feed is not None:  # encoder, concept layer and head together, on images
-            log = optimize_images(groups, [layer, head], feed, train_step, lambda b: total(b, val_acc),
-                                  after_step=head.proximal_step, select=self.select)
+            log = optimize_images(groups, [layer, head], feed, train_step, total, after_step=head.proximal_step,
+                                  select=self.select, log=self._history.phase("joint"))
             va = feed.encode("val")
             out = {"finetune_epochs": log["epochs"], "joint_val_loss": log["val_loss"]}
         else:
             tr_fit, va_fit = (Batch.cat(tr, va), None) if self.train_on_val else (tr, va)
             g = torch.Generator().manual_seed(seed + 1_000)  # draws the augmented view of each image
             log = optimize(groups, [layer, head], len(tr_fit), lambda idx: train_step(tr_fit[idx].view(layer, g)),
-                           None if va_fit is None else lambda: total(va_fit, val_acc), self.epochs,
+                           None if va_fit is None else lambda: total(va_fit), self.epochs,
                            self.batch_size, self.patience, seed, after_step=head.proximal_step,
-                           select=self.select, drop_last=self.drop_last)
+                           select=self.select, drop_last=self.drop_last, log=self._history.phase("joint"))
             out = {"joint_epochs": log["epochs"], "joint_val_loss": log["val_loss"]}
         out |= _extra(log, "joint")
         if use_c:

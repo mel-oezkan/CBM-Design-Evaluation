@@ -118,7 +118,8 @@ Kind-specific contracts:
   rather than editing the training stages. Set `supports_bags = True` only if it pools over M, and
   `uses_features = False` on the head only if `forward` ignores `x_norm`.
 - **Training**: must respect `layer.frozen`, `aligned.has_targets`, `head.optimizer/lr` and
-  `head.phases()`; return a flat `dict[str, float]` log. Losses are hooks on the training base
+  `head.phases()`; return a flat `dict[str, float]` log, and report every epoch to `ctx.history`
+  (pass `log=self._history.phase(<phase>)` to `optimize` / `optimize_images`). Losses are hooks on the training base
   class: `_task_loss(logits, batch)` (cross-entropy) and `_concept_loss(layer, batch, logits=None)` (selected by
   `concept_loss:`, using the caller's `logits` if given, else `batch.concept_logits(layer)`). A new loss is a subclass of `Sequential`/`Joint`/`Independent` that overrides
   one hook and is registered under its own name; don't add a `loss:` string switch.

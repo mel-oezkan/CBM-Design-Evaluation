@@ -20,6 +20,7 @@ from .registry import (ALIGNMENT, BACKBONES, DATASETS, DISCOVERY, EVALUATION, FI
                        INSTANCES, PREDICTOR, TRAINING)
 from .results import ResultsStore, make_row
 from .structures import ConceptSet
+from .tracking import History, WandbTracker
 from .utils import rng_state, seed_everything, stable_hash
 
 log = logging.getLogger(__name__)
@@ -128,8 +129,11 @@ class PipelineBuilder:
         ctx.concepts = concepts
         return concepts
 
-    def train(self, ctx: Context, concepts: ConceptSet) -> TrainedCBM:
+    def train(self, ctx: Context, concepts: ConceptSet, history: History | None = None) -> TrainedCBM:
+        """Fit alignment, concept layer and head. The training stage reports every epoch to ``history``
+        (a fresh one if None), which becomes ``ctx.history``."""
         ctx.use_encoder(None)  # a reused Context must not carry a previous run's fine-tuned encoder
+        ctx.history = history if history is not None else History()
         aligned = self.alignment.fit(concepts, ctx)
         layer = self.generation.build(ctx.feat_dim, aligned)
         head = self.predictor.build(layer.rep_dim, ctx.num_classes, ctx.feat_dim)
@@ -190,20 +194,30 @@ class PipelineBuilder:
 
 
 def run(cfg: ExperimentConfig, store: ResultsStore | None = None, save: bool = True,
-        ctx: Context | None = None) -> RunResult:
-    """Run one config end to end and (optionally) append one row to the results store."""
+        ctx: Context | None = None, tracker: WandbTracker | None = None) -> RunResult:
+    """Run one config end to end and (optionally) append one row to the results store. The per-epoch
+    training history is saved as ``history.jsonl`` in the run directory and, with a ``tracker``,
+    streamed to W&B while the run trains."""
     seed_everything(cfg.seed)
     start = time.time()
     builder = PipelineBuilder(cfg)
-    ctx = builder.context() if ctx is None else builder.reuse(ctx)
-    trace: list[tuple[str, int]] = []
-    concepts = builder.concepts(ctx, trace)
-    cbm = builder.train(ctx, concepts)
-    trace.append(("alignment", len(cbm.concepts)))
-    metrics = builder.evaluate(cbm, ctx)
+    if tracker is not None:
+        tracker.start(cfg)
+    metrics = cbm = None
+    try:
+        ctx = builder.context() if ctx is None else builder.reuse(ctx)
+        trace: list[tuple[str, int]] = []
+        concepts = builder.concepts(ctx, trace)
+        cbm = builder.train(ctx, concepts, History(tracker))
+        trace.append(("alignment", len(cbm.concepts)))
+        metrics = builder.evaluate(cbm, ctx)
+    finally:
+        if tracker is not None:
+            tracker.finish(metrics, cbm.train_log if cbm is not None else None)
     run_dir = cbm.save(Path(cfg.paths["runs"]) / f"{cfg.run_id}-s{cfg.seed}") if save else None
     if run_dir is not None:
         (run_dir / "concept_trace.json").write_text(json.dumps(trace))
+        ctx.history.save(run_dir / "history.jsonl")
     if store is not None:
         store.append(make_row(cfg, metrics, cbm.train_log, trace, time.time() - start))
     log.info("run %s seed %d: %s", cfg.run_id, cfg.seed, _headline(metrics))
@@ -244,7 +258,8 @@ def evaluate_saved(run_dir: str | Path, overrides: dict[str, Any] | None = None,
 
 
 def sweep(configs: list[ExperimentConfig], store: ResultsStore, skip_existing: bool = True,
-          save: bool = True, continue_on_error: bool = True) -> list[dict[str, Any]]:
+          save: bool = True, continue_on_error: bool = True,
+          tracker: WandbTracker | None = None) -> list[dict[str, Any]]:
     """Run many configs, reusing feature caches (they key on dataset+backbone, not on the run).
 
     Consecutive configs with the same ``PipelineBuilder.context_key`` share one Context, so the
@@ -262,7 +277,7 @@ def sweep(configs: list[ExperimentConfig], store: ResultsStore, skip_existing: b
             key = PipelineBuilder(cfg).context_key()
             if ctx is not None and (key is None or key != ctx.key):
                 ctx = None  # a new group: free the previous context before the next one is built
-            res = run(cfg, store, save=save, ctx=ctx)
+            res = run(cfg, store, save=save, ctx=ctx, tracker=tracker)
             ctx = res.ctx if res.ctx.key is not None else None
             status.append({"run_id": cfg.run_id, "seed": cfg.seed, "status": "ok", **res.metrics})
             del res

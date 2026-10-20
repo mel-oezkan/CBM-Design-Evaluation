@@ -22,6 +22,7 @@ from .data.features import encode_split, load_augmented_features, load_aux_featu
 from .data.parts import input_geometry, load_parts
 from .stages.common import match_names
 from .structures import Bag, ConceptSet, FeatureSplit, InstanceSplit, PartSplit
+from .tracking import History
 from .utils import resolve_device
 
 
@@ -41,6 +42,7 @@ class Context:
         self._text: dict[tuple[str, str], torch.Tensor] = {}
         self.instance_source = instances
         self.concepts: ConceptSet | None = None  # the filtered set; concept-guided instance sources read it
+        self.history = History()  # the current run's per-epoch training history (training stages report to it)
         self._instances: dict[tuple, InstanceSplit] = {}
         self._parts: dict[tuple, PartSplit | None] = {}
         self._encoder: nn.Module | None = None  # fine-tuned image encoder of the current run, if any

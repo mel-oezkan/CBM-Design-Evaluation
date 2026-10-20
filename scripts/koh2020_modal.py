@@ -1,8 +1,9 @@
 """Run the Koh et al. 2020 reproduction (``configs/anchors/cub_koh2020*.yaml`` and
 ``configs/ablations/cub_koh2020_frozen*.yaml``) on Modal.
 
-Thin glue only: unpack CUB next to the authors' split, call the pipeline exactly as locally, and
-mirror new result rows to W&B. Caches, runs and results live on the Volume ``cbm-koh2020``.
+Thin glue only: unpack CUB next to the authors' split and call the pipeline exactly as locally, with
+live W&B tracking (each run streams its epoch history and ends with its metrics as the W&B summary).
+Caches, runs (with ``history.jsonl``) and results live on the Volume ``cbm-koh2020``.
 
 - ``frozen``: the frozen-backbone arm (anchors and ablations). First one GPU container per distinct
   feature set extracts the clean and augmented-view features into the cache, then every
@@ -78,17 +79,7 @@ def _rows(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()] if path.exists() else []
 
 
-def _mirror_to_wandb(rows: list[dict], group: str) -> list[dict]:
-    """One W&B run per result row: factors as config, metrics and training log as summary."""
-    import wandb
-
-    for row in rows:
-        run = wandb.init(project=WANDB_PROJECT, group=group, name=f"{row['name']}-{row['run_id']}-s{row['seed']}",
-                         config={"run_id": row["run_id"], "seed": row["seed"], **row.get("factor", {})},
-                         reinit="finish_previous")
-        run.summary.update({"status": row.get("status", "ok"), **row.get("metric", {}),
-                            **{f"train/{k}": v for k, v in (row.get("train") or {}).items()}})
-        run.finish()
+def _summary(rows: list[dict]) -> list[dict]:
     return [{k: row.get(k) for k in ("name", "run_id", "seed", "status")} |
             {m: row.get("metric", {}).get(m) for m in ("shift.test.acc", "concepts.test.concept_error")}
             for row in rows]
@@ -105,10 +96,10 @@ def run_anchor(anchor: str, seed: int, overrides: list[str]) -> list[dict]:
     results.parent.mkdir(parents=True, exist_ok=True)
     try:
         cbm_eval(["-v", "run", f"configs/anchors/{anchor}.yaml", "--seeds", str(seed),
-                  "--set", f"paths.results={results}", *overrides])
+                  "--wandb", WANDB_PROJECT, "--wandb-group", anchor, "--set", f"paths.results={results}", *overrides])
     finally:
         vol.commit()
-    return _mirror_to_wandb(_rows(results), anchor)
+    return _summary(_rows(results))
 
 
 def _frozen_configs(only_anchors: bool, seeds: list[int]) -> list[dict]:
@@ -163,6 +154,7 @@ def frozen_run(cfg: dict) -> list[dict]:
     from cbm_eval.config import ExperimentConfig
     from cbm_eval.pipeline import run
     from cbm_eval.results import ResultsStore
+    from cbm_eval.tracking import WandbTracker
 
     _prepare_workdir()
     c = ExperimentConfig.from_dict(cfg)
@@ -172,11 +164,11 @@ def frozen_run(cfg: dict) -> list[dict]:
     results.parent.mkdir(parents=True, exist_ok=True)
     tmp = Path(f"/tmp/{results.name}")  # moved onto the volume only once the run is complete
     try:
-        run(c, ResultsStore(tmp))
+        run(c, ResultsStore(tmp), tracker=WandbTracker(WANDB_PROJECT, group=c.tags.get("ablation", c.name)))
         results.write_text(tmp.read_text())
     finally:
         vol.commit()
-    return _mirror_to_wandb(_rows(results), c.tags.get("ablation", c.name))
+    return _summary(_rows(results))
 
 
 @app.local_entrypoint()

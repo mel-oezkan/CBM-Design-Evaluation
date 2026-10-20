@@ -245,6 +245,46 @@ come from the clean images, not from the augmented views. In `joint` training, i
 and head that read only concepts (not `embeddings` or `residual`). With `train_on_val`, the
 auxiliary head trains on train + val as well, and `normalize_loss` divides its terms too.
 
+## Epoch history and live tracking
+
+Every training step writes one row per epoch to `history.jsonl` in the run folder. The training log
+keeps only the kept epoch; the history shows how losses and accuracies moved before and after it.
+One row of a fine-tuned joint run (illustrative values):
+
+```json
+{"phase": "joint", "epoch": 18, "train_loss": 0.41, "train_acc": 0.93, "val_loss": 1.02, "val_acc": 0.71,
+ "best": true, "lr": 0.001, "encoder_lr": 0.00047, "seconds": 21.3}
+```
+
+| Field | Meaning |
+|---|---|
+| `phase` | `concept` (x → c), `head_phase0` / `head_phase1` (c → y), or `joint` |
+| `epoch` | epoch number within the phase, from 1 |
+| `train_loss` | mean loss over the epoch's minibatches: the loss the optimizer saw, with penalty and auxiliary terms |
+| `train_acc` | running accuracy over the epoch's minibatches: task accuracy, or concept accuracy in `concept` |
+| `val_loss`, `val_acc` | on the validation split; missing when the phase trains on it (`train_on_val`) |
+| `best` | true when the epoch improved the `select` score; the last `best` row is the kept epoch |
+| `lr`, `encoder_lr` | learning rate of the first optimizer and, with `finetune:`, of the encoder |
+| `seconds` | wall time of the epoch, validation included |
+
+Concept accuracy is only recorded for binary image-level targets. Recording the history draws no
+random numbers and changes no gradient: weights, metrics and run ids are the same with or without
+it, and with or without W&B.
+
+To follow runs while they train, stream the same rows to Weights & Biases (`uv sync --extra tracking`):
+
+```bash
+uv run cbm-eval run configs/anchors/cub_koh2020.yaml --seeds 1 --wandb cbm-koh2020-modular
+uv run cbm-eval sweep configs/ablations/cub_koh2020_frozen.yaml --wandb cbm-koh2020-modular --wandb-group frozen
+```
+
+Each `(config, seed)` becomes one W&B run named `<name>-<run_id>-s<seed>`, grouped by the config's
+name unless `--wandb-group` is set, with the run id, seed and factors as its config. Each phase has
+its own x axis (`joint/epoch`, `concept/epoch`, ...). When the run ends, its metrics and training log
+become the W&B summary; a run that fails is marked failed. `--wandb-mode offline` writes locally for
+a later `wandb sync`. The W&B options are command-line flags, not config keys, so they don't change
+the run id. In Python, pass `tracker=WandbTracker("project")` to `run` or `sweep`.
+
 ## Changing the training
 
 Every option above is a config key, so most changes need no code. For a new loss, subclass a scheme

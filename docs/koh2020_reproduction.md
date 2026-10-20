@@ -128,7 +128,7 @@ uv run cbm-eval analyze --results results/cub_koh2020_frozen.jsonl --metric conc
 
 `scripts/koh2020_modal.py` runs the same configs on [Modal](https://modal.com). It downloads and
 unpacks CUB on the worker and expects the authors' split on the Modal volume `cbm-koh2020` under
-`data/CUB_processed`, plus a Modal secret named `wandb` (result rows are mirrored to W&B). Install
+`data/CUB_processed`, plus a Modal secret named `wandb` (every run streams its epoch history and metrics to W&B). Install
 the client with `uv sync --extra modal` and authenticate once with `uv run modal setup`.
 
 ```bash
