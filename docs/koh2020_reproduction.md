@@ -94,15 +94,14 @@ commands in `CUB/README.md`, plus `CUB/train.py`, `CUB/dataset.py` and `CUB/temp
 
 The fine-tuned sequential and joint anchors pass the raw concept logits to the head
 (`generation: {name: logits, raw: true}`, [#47](https://github.com/mel-oezkan/CBM-Design-Evaluation/issues/47)).
-Runs made before that used the clamped logits and keep their old run ids. Otherwise the fine-tuned
-anchors do not use the frozen arm's options yet
+They also use the frozen arm's SGD settings for the concept layer and head (`optimizer: sgd`,
+`concept_lr`, `normalize_loss`, as in the table above). Runs made before that used the clamped
+logits and Adam, and keep their old run ids. Otherwise the fine-tuned anchors do not use the frozen
+arm's options yet
 ([issue #11](https://github.com/mel-oezkan/CBM-Design-Evaluation/issues/11)):
 
 - **Model selection:** early stopping on the validation loss, versus up to 1000 epochs retrained
   on train+val and selected by training accuracy. `train_on_val` does not support `finetune:` yet.
-- **Optimizers:** the concept layer and head use Adam; the paper uses SGD throughout. The encoder
-  uses SGD as in the paper. `stages.training.optimizer: sgd` (with `momentum`, `weight_decay`)
-  expresses the paper's choice; the anchors don't set it yet, so their run ids and results stay as they are.
 - **Inputs:** ImageNet normalization instead of mean 0.5 / std 2; evaluation images are resized
   to 299 rather than center-cropped. The auxiliary concept head reads standardized features; the
   paper's reads them raw.

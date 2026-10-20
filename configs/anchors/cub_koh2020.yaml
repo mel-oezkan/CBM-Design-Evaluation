@@ -4,17 +4,16 @@
 # Matched: authors' train/val split and 112 class-level concepts voted as in their code
 #   (`split_dir` = CUB_processed/class_attr_data_10 from their Codalab worksheet
 #   0x362911581fcd4e048ddfd84f47203fd2; `majority_vote: koh`); Inception-v3 (ImageNet) fine-tuned
-#   end to end with SGD (momentum 0.9, weight decay 4e-4, batch 64) and their augmentation; linear
+#   end to end with their augmentation; one SGD setup (lr 0.001, momentum 0.9, weight decay 4e-4,
+#   batch 64) for encoder, concept layer, auxiliary head and c -> y head; linear
 #   c -> y head on unclamped concept logits (`raw: true`, issue #47); imbalance-weighted concept BCE;
 #   lambda = 0.01 (their concept loss sums over the 112 concepts, ours averages, so
-#   concept_weight = 0.01 * 112). They divide the loss
-#   by 1 + lambda * 112 = 2.12 and we do not, so the encoder lr is 0.001 / 2.12. Auxiliary Inception
+#   concept_weight = 0.01 * 112); loss divided by 1 + lambda * 112 (`normalize_loss`). Auxiliary Inception
 #   head on Mixed_6e (`aux`, their -use_aux): 0.4 x the same loss on its concept logits, which also
 #   pass through the shared c -> y head.
 # Remaining gaps:
 #   - model selection: early stopping on the val loss (ours) vs. up to 1000 epochs, retrained on
-#     train+val and picked by training accuracy (theirs); concept layer and head use Adam (ours) vs. SGD
-#     (`stages.training.optimizer: sgd` expresses theirs; not set, to keep this anchor's run id);
+#     train+val and picked by training accuracy (theirs);
 #   - ImageNet input normalization (theirs: mean 0.5 / std 2); eval images resized to 299 (theirs:
 #     center crop without resizing); the auxiliary head reads standardized features (theirs: raw);
 #   - interventions (leakage evaluator) replace random single concepts, not visibility-aware groups.
@@ -30,9 +29,15 @@ stages:
   training:
     name: joint_weighted
     concept_weight: 1.12
+    normalize_loss: true
+    optimizer: sgd
+    lr: 0.001
+    momentum: 0.9
+    weight_decay: 0.0004
+    batch_size: 64
     aux: {weight: 0.4, init_std: 0.001}
     device: auto
-    finetune: {epochs: 300, lr: 0.00047, optimizer: sgd, momentum: 0.9, weight_decay: 0.0004, batch_size: 64,
+    finetune: {epochs: 300, lr: 0.001, optimizer: sgd, momentum: 0.9, weight_decay: 0.0004, batch_size: 64,
                patience: 30, num_workers: 8}
 evaluation:
   - {name: shift, splits: [test]}

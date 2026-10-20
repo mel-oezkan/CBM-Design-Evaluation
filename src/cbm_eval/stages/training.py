@@ -682,7 +682,7 @@ class _Base(Training):
 
     def _fit_head(self, layer, head, tr: Batch, va: Batch, rep_fn: Callable[[Batch], torch.Tensor],
                   seed) -> dict[str, float]:
-        """Fit the head on ``rep_fn(batch)``, which reads features only through ``layer.represent``."""
+        """Fit the head on ``rep_fn(batch)``, which reads features only through the layer (``from_logits``)."""
         out: dict[str, float] = {}
         if not (layer.represent_uses_x or head.uses_features):
             tr, va = tr.without_x(), va.without_x()  # minibatches then index (N, K) tensors only

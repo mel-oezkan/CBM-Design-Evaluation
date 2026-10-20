@@ -3,7 +3,9 @@
 # hence `generation: scores` (probabilities) rather than `logits`.
 # The x -> c phase fine-tunes Inception-v3 end to end with Koh et al.'s x -> c settings (SGD, lr 0.01,
 # momentum 0.9, weight decay 4e-5, batch 64; same loss scale as theirs) and the auxiliary Inception
-# head (`aux`, their -use_aux), which reaches the encoder through Mixed_6e. Data and gaps as in
+# head (`aux`, their -use_aux), which reaches the encoder through Mixed_6e; concept layer and auxiliary
+# head use the same SGD settings (`concept_lr`, `concept_weight_decay`). The c -> y head uses their
+# Independent_CtoY settings (SGD, lr 0.001, momentum 0.9, weight decay 5e-05, batch 64). Data and gaps as in
 # cub_koh2020.yaml (joint).
 name: cub_koh2020_independent
 dataset: {name: cub, root: data/CUB_200_2011, majority_vote: koh, split_dir: data/CUB_processed/class_attr_data_10}
@@ -16,6 +18,13 @@ stages:
   predictor: {name: dense}
   training:
     name: independent_weighted
+    optimizer: sgd
+    momentum: 0.9
+    concept_lr: 0.01
+    concept_weight_decay: 0.00004
+    lr: 0.001
+    weight_decay: 0.00005
+    batch_size: 64
     aux: {weight: 0.4, init_std: 0.001}
     device: auto
     finetune: {epochs: 300, lr: 0.01, optimizer: sgd, momentum: 0.9, weight_decay: 0.00004, batch_size: 64,
