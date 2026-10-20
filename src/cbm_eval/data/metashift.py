@@ -39,7 +39,8 @@ class MetaShift(ImageDataset):
 
     def samples(self, split: str) -> list[Sample]:
         col = self.meta["split"]
-        mask = (col == split) if col.dtype == object else (col == _SPLIT_IDS[split])
+        # not `col.dtype == object`: pandas >= 3 reads strings as StringDtype
+        mask = (col == _SPLIT_IDS[split]) if pd.api.types.is_numeric_dtype(col) else (col == split)
         return [
             Sample(image=str(self.root / r.filename), label=int(r.y), attr=int(r.a))
             for r in self.meta[mask].itertuples()
