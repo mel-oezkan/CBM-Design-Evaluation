@@ -7,14 +7,10 @@ import numpy as np
 import pytest
 import torch
 from PIL import Image
-from torchvision import transforms as T
 
-from cbm_eval.backbones.base import Backbone
-from cbm_eval.data.synthetic import toy_latent
 from cbm_eval.grounding import Detection, match_phrase
 from cbm_eval.instances.segments import GroundedSAM, Segment, pack, unpack
 from cbm_eval.pipeline import PipelineBuilder, run
-from cbm_eval.registry import BACKBONES
 from cbm_eval.stages.predictor import LinearHead, MILHead
 from cbm_eval.stages.training import concept_loss
 from cbm_eval.structures import Bag
@@ -184,35 +180,6 @@ def test_postprocess_filters_merges_and_falls_back():
 
 
 # -- segment sources on image files, with stub detector / SAM --------------------------------------
-
-
-@BACKBONES.register("test_pixels")
-class PixelBackbone(Backbone):
-    """Tiny image encoder with a text tower, so concept-guided segmentation runs without CLIP."""
-
-    has_text = True
-    dim = 8
-
-    def __init__(self):
-        super().__init__()
-        self.proj = torch.randn(3 * 4 * 4, self.dim, generator=torch.Generator().manual_seed(0))
-        self.patch_grid = 4
-
-    def cache_key(self):
-        return {"name": "test_pixels"}
-
-    def transform(self):
-        return T.Compose([T.Resize((16, 16)), T.ToTensor()])
-
-    def encode_patches(self, images):
-        p = images.unfold(2, 4, 4).unfold(3, 4, 4)  # (B, 3, 4, 4, 4, 4)
-        return p.permute(0, 2, 3, 1, 4, 5).flatten(3).flatten(1, 2) @ self.proj
-
-    def encode_images(self, images):
-        return self.encode_patches(images).mean(1)
-
-    def encode_text(self, texts):
-        return torch.stack([toy_latent(t, self.dim) for t in texts])
 
 
 class StubDetector:

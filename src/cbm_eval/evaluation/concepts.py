@@ -17,6 +17,8 @@ from .base import Evaluator
 
 @EVALUATION.register("concepts")
 class ConceptEvaluator(Evaluator):
+    needs_concept_labels = True
+
     def __init__(self, splits: tuple[str, ...] = ("test",)):
         self.splits = splits
 

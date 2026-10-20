@@ -14,7 +14,7 @@ before generation because the concept layer is built from the aligned concepts.
 <div class="cbm-map" markdown>
 <div class="cbm-row cbm-inputs" markdown>
 [**Experiment configs**<span>Anchors and ablations</span>](configs.md){.cbm-node}
-[**Datasets**<span>Waterbirds, CUB, MetaShift, synthetic</span>](components.md#datasets){.cbm-node}
+[**Datasets**<span>Waterbirds, CUB, MetaShift, CIFAR, synthetic</span>](components.md#datasets){.cbm-node}
 [**Backbones**<span>CLIP, DINOv2, ResNet, Inception, toy</span>](components.md#backbones){.cbm-node}
 [**Instances**<span>Optional: image → bag of segments</span>](components.md#instance-sources){.cbm-node .cbm-optional}
 </div>
@@ -93,7 +93,7 @@ patch features.
 | Part | Code (under `src/cbm_eval/`) |
 |---|---|
 | Experiment configs | `configs/anchors/*.yaml`, `configs/ablations/*.yaml`, `src/cbm_eval/config.py` |
-| Datasets | `data/` — `waterbirds`, `cub`, `metashift`, `synthetic` |
+| Datasets | `data/` — `waterbirds`, `cub`, `metashift`, `cifar10`, `cifar100`, `synthetic` |
 | Backbones | `backbones/` — `clip` (OpenCLIP), `dinov2`, `resnet`, `inception` (Inception-v3), `toy` |
 | Pipeline builder | `pipeline.py` (+ `registry.py`, `context.py`) |
 | Stage modules | `stages/` — one ABC per stage in `stages/base.py` |
