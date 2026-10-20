@@ -606,7 +606,9 @@ class _Base(Training):
                              "`predictor: dense`); remove `aux:` for this combination")
         aux = self.aux is not None
         tr = _batch(ctx, aligned, "train", aux=aux)
-        va = _batch(ctx, aligned, "val", aux=aux and (self.train_on_val or self.concept_train_on_val))
+        # frozen val tap features only for a frozen phase that trains on val; fine-tuning taps the encoder itself
+        va = _batch(ctx, aligned, "val", aux=aux and self.finetune is None
+                    and (self.train_on_val or self.concept_train_on_val))
         if self.augment is not None and tr.bag is not None:
             raise ValueError("`stages.training.augment` augments whole images and does not support instance bags; "
                              "remove `instances:` or `augment:`")
