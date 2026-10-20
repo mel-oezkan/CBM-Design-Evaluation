@@ -46,7 +46,7 @@ per-config means and the effect of each design choice with confidence intervals.
 | Predictor | `sparse`, `dense`, `residual`, `mil` |
 | Training | `independent`, `sequential`, `joint` (+ `*_weighted`); options `finetune:`, `aux:` |
 
-- **Datasets:** Waterbirds, CUB, MetaShift, synthetic
+- **Datasets:** Waterbirds, CUB, MetaShift, FunnyBirds (rendered part-based birds), synthetic
 - **Backbones:** OpenCLIP, DINOv2, ResNet, Inception-v3, toy
 - **Evaluation:** distribution shift (worst-group accuracy), concept accuracy, leakage,
   localization, part localization, faithfulness

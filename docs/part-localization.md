@@ -1,4 +1,4 @@
-# Part localization (CUB)
+# Part localization (CUB, FunnyBirds)
 
 `keypoint_distance` and `part_iou` re-implement the ProtoCBM localization metrics
 ([pascal0012/ProtoCBM](https://github.com/pascal0012/ProtoCBM), `localization/`). Concept maps are
@@ -8,10 +8,14 @@ scores the group's concept with the highest image-level score. `select: present`
 every concept annotated present. Annotations go through the backbone's resize and center crop and
 are cached under `paths.cache/parts/`.
 
+On FunnyBirds the groups are the five parts. Masks come from each image's color-coded part map
+(`PartAnnotation.label_map`, decoded with `PartSpec.seg_colors`). Keypoints are the centroids of the
+part instances (two eyes, feet and wings).
+
 | Evaluator | Metrics | Options |
 |---|---|---|
-| `keypoint_distance` | `dist` (map peak → nearest visible keypoint, in image sides; mean over the 12 groups), `dist.<group>`, `pck` (share within `threshold`), `dist_center` / `pck_center` (a map that points at the center) | `select`, `threshold: 0.1` |
-| `part_iou` | `miou` (over all image–group pairs), `iou.<group>` for the 8 mask groups, `miou_center` (center prior) | `select`, `hard: true`, `keep_ratio: 0.5`, `seg_size: 56` |
+| `keypoint_distance` | `dist` (map peak → nearest visible keypoint, in image sides; mean over the groups: 12 on CUB, 5 on FunnyBirds), `dist.<group>`, `pck` (share within `threshold`), `dist_center` / `pck_center` (a map that points at the center) | `select`, `threshold: 0.1` |
+| `part_iou` | `miou` (over all image–group pairs), `iou.<group>` per mask group (8 on CUB, 5 on FunnyBirds), `miou_center` (center prior) | `select`, `hard: true`, `keep_ratio: 0.5`, `seg_size: 56` |
 
 Differences from ProtoCBM: the peak is the center of the top patch rather than the argmax of a
 bilinear upsample (the same up to sub-patch rounding, but without the corner bias of clamped

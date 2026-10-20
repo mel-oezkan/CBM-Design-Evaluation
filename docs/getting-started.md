@@ -27,7 +27,7 @@ uv run cbm-eval list
 ```
 
 ```text
-dataset     cub, metashift, synthetic, waterbirds
+dataset     cub, funnybirds, metashift, synthetic, waterbirds
 backbone    clip, dinov2, inception, resnet, toy
 instances   grounded_boxes, grounded_sam, patches, sam_grid
 discovery   dataset, kb, llm, sae, static, vlm
@@ -189,6 +189,7 @@ The other anchors in `configs/anchors/` target real datasets:
 | `waterbirds_lfcbm.yaml` | Label-free-CBM style on Waterbirds: Claude-generated concepts, CLIP alignment | Waterbirds, `clip` + `llm` extras, Claude credentials |
 | `metashift_lfcbm.yaml` | The same design on MetaShift | MetaShift, `clip` + `llm` extras, Claude credentials |
 | `cub_human.yaml` | Classic CBM on CUB: annotated attributes, human supervision, keypoint localization | CUB, `clip` extra |
+| `funnybirds_human.yaml` | The same design on FunnyBirds: part variants as concepts, part-map localization | FunnyBirds (download or render), `clip` extra |
 | `waterbirds_segmil.yaml`, `cub_segmil.yaml` | SEG-MIL-CBM: concept-guided segments as instance bags | The dataset, `clip` + `hf` + `llm` extras, Claude credentials; a GPU helps |
 | `cub_koh2020_frozen*.yaml` | Reproduction of Koh et al. 2020 following the authors' code, Inception-v3 frozen | CUB and the authors' split; a GPU for feature extraction |
 | `cub_koh2020*.yaml` | The same with a fine-tuned Inception-v3 | CUB and the authors' split, a GPU |
