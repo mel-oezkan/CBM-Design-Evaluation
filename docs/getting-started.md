@@ -210,6 +210,8 @@ Training runs on the CPU unless the training stage sets `device` (e.g. `device: 
 
 - [How a run works](how-it-works.md): what each stage does in the run you just trained, and
   [how training works](training.md) in detail.
+- [Python API](python-api.md): the same workflow from a notebook or script, plus
+  prediction, interventions and running one stage on its own.
 - [Designing an experiment](experiments.md): writing your own anchors and ablations, and adding
   a paper's method.
 - [Contributing](contributing.md): adding a new discovery method, loss, predictor or evaluator.

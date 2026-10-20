@@ -92,6 +92,7 @@ nav:
       - Contributing: contributing.md
       - Filing issues: issues.md
   - API reference:
+      - Python API: python-api.md
       - Core: api/core.md
       - Stage interfaces: api/stages.md
       - Data, backbones, instances: api/inputs.md

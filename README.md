@@ -64,6 +64,7 @@ uv run --group docs properdocs serve     # http://127.0.0.1:8000
 ```
 
 - [Getting started](docs/getting-started.md): a first run, a sweep and its analysis, then real data
+- [Python API](docs/python-api.md): train, predict, intervene and analyze from a notebook ([`examples/`](examples), tested)
 - [How a run works](docs/how-it-works.md) and [Training](docs/training.md): what each stage does, step by step
 - [Pipeline map](docs/architecture.md): the code layout and what the stages pass to each other
 - [Designing an experiment](docs/experiments.md): example anchors and ablations; worked examples
