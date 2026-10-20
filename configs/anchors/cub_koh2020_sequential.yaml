@@ -1,5 +1,5 @@
 # Koh et al. 2020, CUB, SEQUENTIAL bottleneck (Table 1: 0.243 task error, Table 2: 0.034 concept error):
-# x -> c fitted first, then a linear c -> y head on the predicted concept logits.
+# x -> c fitted first, then a linear c -> y head on the predicted, unclamped concept logits (`raw: true`).
 # The x -> c phase fine-tunes Inception-v3 end to end with Koh et al.'s x -> c settings (SGD, lr 0.01,
 # momentum 0.9, weight decay 4e-5, batch 64; same loss scale as theirs) and the auxiliary Inception
 # head (`aux`, their -use_aux), which reaches the encoder through Mixed_6e. Data and gaps as in
@@ -10,7 +10,7 @@ backbone: {name: inception}
 stages:
   discovery: {name: dataset}
   filtering: [{name: rules, remove_class_names: false, max_words: 10}]
-  generation: {name: logits}
+  generation: {name: logits, raw: true}
   alignment: {name: human}
   predictor: {name: dense}
   training:

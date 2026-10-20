@@ -85,10 +85,17 @@ commands in `CUB/README.md`, plus `CUB/train.py`, `CUB/dataset.py` and `CUB/temp
 - **Interventions:** the `leakage` evaluator replaces random single concepts, not the paper's
   visibility-aware concept groups. With `generation: logits`, an intervened 0/1 value becomes a
   saturated logit (±13.8) rather than the 5th/95th-percentile logits the paper uses.
+- **Logit clamp** ([#47](https://github.com/mel-oezkan/CBM-Design-Evaluation/issues/47)): the
+  sequential and joint anchors use `generation: logits`, which clamps the concept logits at ±13.8
+  before the head. Beyond ±13.8 the task loss has no gradient. The authors pass the raw logits;
+  `generation: {raw: true}` does that.
 
 ### Remaining differences: fine-tuned arm
 
-The fine-tuned anchors do not use the frozen arm's options yet
+The fine-tuned sequential and joint anchors pass the raw concept logits to the head
+(`generation: {name: logits, raw: true}`, [#47](https://github.com/mel-oezkan/CBM-Design-Evaluation/issues/47)).
+Runs made before that used the clamped logits and keep their old run ids. Otherwise the fine-tuned
+anchors do not use the frozen arm's options yet
 ([issue #11](https://github.com/mel-oezkan/CBM-Design-Evaluation/issues/11)):
 
 - **Model selection:** early stopping on the validation loss, versus up to 1000 epochs retrained

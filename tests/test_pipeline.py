@@ -154,11 +154,14 @@ def test_context_key_separates_what_the_context_reads(base_cfg):
 
 
 HUMAN = {"stages.alignment": {"name": "human"}}
+RAW = {"name": "logits", "raw": True}
 
 
 @pytest.mark.parametrize("overrides", [
     {"stages.generation": {"name": "logits"}},
     {"stages.generation": {"name": "logits"}, "stages.training": {"name": "joint_weighted", "epochs": 20}},
+    {"stages.generation": RAW, "stages.training": {"name": "sequential_weighted", "epochs": 20}},
+    {"stages.generation": RAW, "stages.training": {"name": "joint_weighted", "epochs": 20}},
     {"stages.training": {"name": "sequential_weighted", "epochs": 20}},
     {"stages.training": {"name": "independent_weighted", "epochs": 20}},
 ])
@@ -182,6 +185,36 @@ def test_logits_generation_feeds_logits():
     c_hat, rep = layer(x)
     assert torch.allclose(rep, layer.concept_logits(x), atol=1e-4)
     assert torch.all((c_hat >= 0) & (c_hat <= 1))
+
+
+def test_raw_logits_reach_the_head_unclamped():
+    """Issue #47: the default clamps logits at +-logit(1 - eps) and cuts their gradient; ``raw`` does not.
+    Intervened values still go through the clamped ``logit``; the other concepts stay raw."""
+    from cbm_eval.stages.base import AlignedConcepts
+    from cbm_eval.stages.generation import LogitScores
+    from cbm_eval.structures import ConceptSet
+
+    aligned = AlignedConcepts(ConceptSet(["a", "b", "c", "d"]), target_type="binary")
+    z = torch.tensor([[5.0, 13.0, 14.0, -20.0]], requires_grad=True)
+    clamped, raw = LogitScores().build(8, aligned), LogitScores(raw=True).build(8, aligned)
+    rep = clamped.from_logits(z, None)[1]
+    rep.sum().backward()
+    assert rep[0, 2] < 13.9 and torch.allclose(z.grad, torch.tensor([[1.0, 1.0, 0.0, 0.0]]))
+    z.grad = None
+    c_hat, rep = raw.from_logits(z, None)
+    rep.sum().backward()
+    assert torch.equal(rep, z) and z.grad.tolist() == [[1.0] * 4]
+    assert torch.equal(c_hat, torch.sigmoid(z))
+
+    mask, values = torch.tensor([[False, True, False, False]]), torch.tensor([[0.0, 0.0, 0.0, 0.0]])
+    c_hat, rep = raw.from_logits(z, None, (mask, values))
+    assert c_hat[0, 1] == 0 and torch.allclose(rep[0, 1], torch.logit(torch.tensor(0.0), eps=1e-6))
+    assert torch.equal(rep[0, [0, 2, 3]], z[0, [0, 2, 3]])
+    bags = z.detach()[:, None].expand(1, 3, 4)  # (N, M, K); an image-level mask covers every instance
+    c_hat, rep = raw.from_logits(bags, None, (mask, values))
+    assert torch.all(c_hat[0, :, 1] == 0) and torch.equal(rep[..., [0, 2, 3]], bags[..., [0, 2, 3]])
+    x = torch.randn(5, 8)
+    assert torch.equal(raw(x)[1], raw.concept_logits(x))
 
 
 def test_weighted_training_refuses_continuous_targets(base_cfg):

@@ -114,7 +114,9 @@ Kind-specific contracts:
 - **Generation**: subclass `ConceptLayer`, implement `represent` and set `rep_dim`; concept
   predictions stay in target space so interventions keep working. Set `represent_uses_x = False`
   if `represent` ignores `x`; change the scores in `logits_from_normalized`, not `concept_logits`. Don't override `forward`:
-  joint training composes `logits_from_normalized`, `activate` and `represent` itself.
+  training composes `logits_from_normalized` and `from_logits` (`activate`, interventions, `represent`) itself.
+  Override `from_logits` only when the representation needs the logits that `activate` loses
+  (`logits: {raw: true}`).
 - **Predictor**: return a `PredictorHead`; use `penalty()`/`proximal_step()`/`phases()` hooks
   rather than editing the training stages. Set `supports_bags = True` only if it pools over M, and
   `uses_features = False` on the head only if `forward` ignores `x_norm`.

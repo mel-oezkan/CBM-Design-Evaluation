@@ -5,8 +5,9 @@
 #   (`split_dir` = CUB_processed/class_attr_data_10 from their Codalab worksheet
 #   0x362911581fcd4e048ddfd84f47203fd2; `majority_vote: koh`); Inception-v3 (ImageNet) fine-tuned
 #   end to end with SGD (momentum 0.9, weight decay 4e-4, batch 64) and their augmentation; linear
-#   c -> y head on concept logits; imbalance-weighted concept BCE; lambda = 0.01 (their concept loss
-#   sums over the 112 concepts, ours averages, so concept_weight = 0.01 * 112). They divide the loss
+#   c -> y head on unclamped concept logits (`raw: true`, issue #47); imbalance-weighted concept BCE;
+#   lambda = 0.01 (their concept loss sums over the 112 concepts, ours averages, so
+#   concept_weight = 0.01 * 112). They divide the loss
 #   by 1 + lambda * 112 = 2.12 and we do not, so the encoder lr is 0.001 / 2.12. Auxiliary Inception
 #   head on Mixed_6e (`aux`, their -use_aux): 0.4 x the same loss on its concept logits, which also
 #   pass through the shared c -> y head.
@@ -23,7 +24,7 @@ backbone: {name: inception}
 stages:
   discovery: {name: dataset}
   filtering: [{name: rules, remove_class_names: false, max_words: 10}]
-  generation: {name: logits}
+  generation: {name: logits, raw: true}
   alignment: {name: human}
   predictor: {name: dense}
   training:

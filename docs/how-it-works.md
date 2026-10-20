@@ -116,7 +116,8 @@ logits  (N, 4)     class scores
   `clip` targets it stays linear, so `c_hat` is directly comparable to the standardized
   similarities.
 - The **generation** stage decides what the head gets from `c_hat`. With `scores` it gets `c_hat`
-  itself; `logits` passes the logit of a probability, `boc` a hard 0/1 per concept, and
+  itself; `logits` passes the logit of a probability (clamped at ±13.8; `raw: true` passes the
+  unclamped logit), `boc` a hard 0/1 per concept, and
   `embeddings` a learned 16-d vector per concept, mixed by the concept's probability (CEM).
 - The **predictor** is the head. `sparse` (this anchor) is a linear layer with an elastic-net
   penalty that can set weights to exactly zero, so each class is explained by fewer concepts;

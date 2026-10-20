@@ -23,17 +23,29 @@ class ScoreLayer(ConceptLayer):
 class LogitScoreLayer(ConceptLayer):
     """The predictor sees concept logits rather than probabilities: Koh et al. (2020) connect f to
     the logits for sequential and joint CBMs. ``c_hat`` stays a probability (so interventions keep
-    working); it is mapped back with ``logit`` clamped at ``eps``, so intervened 0/1 values become
+    working). By default the head reads it mapped back with ``logit`` clamped at ``eps``: logits
+    past +-logit(1 - eps) (+-13.8 at 1e-6) reach the head clamped and get no task-loss gradient.
+    ``raw`` passes the unclamped logits, as Koh et al. do; only intervened values and true targets
+    (``independent``) still go through the clamped ``logit``. Either way an intervened 0/1 becomes
     +-logit(1 - eps) instead of Koh et al.'s 5th/95th-percentile logits."""
 
     represent_uses_x = False
 
-    def __init__(self, in_dim, aligned, eps: float, **kw):
+    def __init__(self, in_dim, aligned, eps: float, raw: bool = False, **kw):
         super().__init__(in_dim, aligned, **kw)
-        self.rep_dim, self.eps = self.n_concepts, eps
+        self.rep_dim, self.eps, self.raw = self.n_concepts, eps, raw
 
     def represent(self, c_hat, x):
         return torch.logit(c_hat, eps=self.eps) if self.target_type == "binary" else c_hat
+
+    def from_logits(self, logits, x, intervene=None):
+        if not self.raw or self.target_type != "binary":
+            return super().from_logits(logits, x, intervene)
+        c_hat = self.activate(logits)
+        if intervene is None:
+            return c_hat, logits
+        c_hat, mask = self.intervened(c_hat, intervene)
+        return c_hat, torch.where(mask, self.represent(c_hat, x), logits)
 
 
 class BagOfConceptsLayer(ConceptLayer):
@@ -95,14 +107,15 @@ class Scores(_LinearOptions):
 @GENERATION.register("logits")
 class LogitScores(_LinearOptions):
     """Concept logits into the predictor (Koh et al.'s sequential and joint CBMs); see ``LogitScoreLayer``.
+    ``raw``: the head reads the unclamped concept logits (default False keeps the clamp at ``eps``).
     ``dropout``, ``standardize`` and ``init_std`` configure the x -> c linear layer."""
 
-    def __init__(self, eps: float = 1e-6, **kw):
+    def __init__(self, eps: float = 1e-6, raw: bool = False, **kw):
         super().__init__(**kw)
-        self.eps = eps
+        self.eps, self.raw = eps, raw
 
     def build(self, in_dim, aligned):
-        return LogitScoreLayer(in_dim, aligned, self.eps, **self.layer_kw)
+        return LogitScoreLayer(in_dim, aligned, self.eps, self.raw, **self.layer_kw)
 
 
 @GENERATION.register("boc")

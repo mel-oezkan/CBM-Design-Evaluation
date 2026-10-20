@@ -29,6 +29,9 @@ logits = head(rep, x_n)
   below).
 - `represent` comes from the generation stage, and `head` from the predictor stage. `logits` has
   shape `(N, C)` for `C` classes.
+- One generation reads `z` instead of `c_hat`: `logits` with `raw: true` gives the head `z` itself.
+  The default `logits` gives it `logit(c_hat)` clamped at ±13.8, so a concept logit past ±13.8 gets
+  no task-loss gradient. The code composes these steps in `ConceptLayer.from_logits`.
 
 There are three groups of trainable parameters:
 

@@ -76,7 +76,8 @@ trainable until alignment decides how each concept neuron gets its meaning.
 
 The stages split the model as well as the pipeline. `ConceptLayer` in `stages/base.py` holds the
 shared part (normalize, linear, activate, intervene); each generation variant only overrides
-`represent()`. The head also receives the normalized features, so `residual` can bypass the
+`represent()` (raw `logits` also overrides `from_logits()`, because the head reads the logits that
+`activate` loses). The head also receives the normalized features, so `residual` can bypass the
 bottleneck and `mil` can compute attention over instances. Concept predictions stay in target
 space, which is what lets interventions and the localization evaluators reuse the same layer on
 patch features.
@@ -119,7 +120,8 @@ How the stages divide the work:
   open-vocabulary detector; `human` uses dataset annotations; `weights` fixes each neuron to the
   concept's text embedding (or SAE direction) with no targets.
 - **Generation** decides what the predictor sees: the concept score (`scores`: probabilities for
-  binary concepts; `logits`: their logits, as Koh et al. connect f), a CEM-style embedding mixed by
+  binary concepts; `logits`: their logits, as Koh et al. connect f, clamped at ±13.8 unless
+  `raw: true`), a CEM-style embedding mixed by
   concept probability, or a hard 0/1 bit (straight-through in joint training).
 - **Training** fits on cached frozen features by default. With `finetune: {epochs, lr, optimizer,
   momentum, weight_decay, lr_step, lr_gamma, batch_size, patience, augment, num_workers}` it also
