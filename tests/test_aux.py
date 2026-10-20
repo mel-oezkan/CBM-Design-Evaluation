@@ -58,9 +58,9 @@ def test_aux_gradient_reaches_the_head_and_aux_head_but_not_the_concept_layer(ba
 
 
 @pytest.mark.parametrize("name,generation", [("independent_weighted", "scores"), ("sequential_weighted", "logits"),
-                                             ("joint_weighted", "logits")])
+                                             ("joint_weighted", "logits"), ("joint_weighted", "raw_logits")])
 def test_finetuned_aux_reaches_the_encoder_and_round_trips(base_cfg, name, generation):
-    gen = {"stages.generation": {"name": generation}}
+    gen = {"stages.generation": {"name": "logits", "raw": True} if generation == "raw_logits" else {"name": generation}}
     cfg = _cfg(base_cfg, {"name": name, "epochs": 3, "finetune": FT, "aux": AUX}, **gen)
     res = run(cfg, save=True)
     assert all(not math.isnan(v) for v in res.metrics.values()), res.metrics

@@ -28,15 +28,15 @@ class _PerStep:
         if isinstance(self, Sequential):
             def rep_fn(b):
                 with torch.no_grad():
-                    c_hat = layer.activate(layer.concept_logits(b.x))
-                return layer.represent(c_hat, b.x)
+                    z = layer.concept_logits(b.x)
+                return layer.from_logits(z, b.x)[1]
         return super()._fit_head(layer, head, tr, va, rep_fn, seed)
 
 
 PER_STEP = {cls: type(f"PerStep{cls.__name__}", (_PerStep, cls), {})
             for cls in (Sequential, Independent, Joint, SequentialWeighted, IndependentWeighted, JointWeighted)}
 
-GENERATIONS = [{"name": "scores"}, {"name": "logits"}, {"name": "boc"}, {"name": "embeddings", "emb_dim": 4}]
+GENERATIONS = [{"name": "scores"}, {"name": "logits"}, {"name": "logits", "raw": True}, {"name": "boc"}, {"name": "embeddings", "emb_dim": 4}]
 PREDICTORS = [{"name": "dense"}, {"name": "sparse"}, {"name": "residual"}]
 HUMAN = [{"stages.alignment": {"name": "human"}, "stages.generation": g, "stages.predictor": p,
           "stages.training": {"name": t}}

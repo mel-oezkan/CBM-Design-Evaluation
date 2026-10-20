@@ -149,16 +149,27 @@ class ConceptLayer(nn.Module):
     def represent(self, c_hat: torch.Tensor, x: torch.Tensor) -> torch.Tensor: ...
 
     def forward(self, x: torch.Tensor, intervene: tuple[torch.Tensor, torch.Tensor] | None = None):
-        """``intervene = (mask, values)`` replaces concept predictions. On instance bags, an
-        image-level (N, K) mask or value applies to every instance of the image."""
-        c_hat = self.activate(self.concept_logits(x))
+        """``intervene = (mask, values)`` replaces concept predictions (see ``intervened``)."""
+        return self.from_logits(self.concept_logits(x), x, intervene)
+
+    def from_logits(self, logits: torch.Tensor, x: torch.Tensor | None,
+                    intervene: tuple[torch.Tensor, torch.Tensor] | None = None):
+        """``(c_hat, representation)`` from concept logits. ``forward`` and the training stages compose
+        the layer through this method. Override it only when the representation needs the logits
+        themselves, which ``activate`` can lose (``logits: {raw: true}``); otherwise override ``represent``."""
+        c_hat = self.activate(logits)
         if intervene is not None:
-            mask, values = intervene
-            if c_hat.dim() == 3:
-                mask = mask[:, None] if mask.dim() == 2 else mask
-                values = values[:, None] if values.dim() == 2 else values
-            c_hat = torch.where(mask, values.to(c_hat), c_hat)
+            c_hat, _ = self.intervened(c_hat, intervene)
         return c_hat, self.represent(c_hat, x)
+
+    def intervened(self, c_hat: torch.Tensor, intervene: tuple[torch.Tensor, torch.Tensor]):
+        """``(c_hat with intervene = (mask, values) applied, mask)``. On instance bags, an image-level
+        (N, K) mask or value applies to every instance of the image."""
+        mask, values = intervene
+        if c_hat.dim() == 3:
+            mask = mask[:, None] if mask.dim() == 2 else mask
+            values = values[:, None] if values.dim() == 2 else values
+        return torch.where(mask, values.to(c_hat), c_hat), mask
 
     def binarize(self, c_hat: torch.Tensor) -> torch.Tensor:
         return (c_hat > (0.5 if self.target_type == "binary" else 0.0)).float()

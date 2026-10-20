@@ -88,7 +88,7 @@ class Batch:
     """Inputs, labels, concept targets and (for instance bags) the bag, indexed together.
 
     On frozen features, work that cannot change during a phase is done once over the whole split:
-    ``xn`` holds ``x`` normalized by the concept layer, ``c`` a frozen layer's concept predictions.
+    ``xn`` holds ``x`` normalized by the concept layer, ``z`` a frozen layer's concept logits.
     ``x`` (and ``xn``) are None once neither the concept layer nor the head reads them.
     ``xa`` (N, D_aux) are auxiliary-tap features (training ``aux:``); only batches that are trained on carry them.
     ``views`` (N, V, D) are augmented copies of ``x`` (training ``augment:``); ``view`` picks one per image.
@@ -99,7 +99,7 @@ class Batch:
     t: torch.Tensor | None = None
     bag: Bag | None = None
     xn: torch.Tensor | None = None
-    c: torch.Tensor | None = None
+    z: torch.Tensor | None = None
     xa: torch.Tensor | None = None
     views: torch.Tensor | None = None
 
@@ -682,7 +682,7 @@ class _Base(Training):
 
     def _fit_head(self, layer, head, tr: Batch, va: Batch, rep_fn: Callable[[Batch], torch.Tensor],
                   seed) -> dict[str, float]:
-        """Fit the head on ``rep_fn(batch)``, which reads features only through ``layer.represent``."""
+        """Fit the head on ``rep_fn(batch)``, which reads features only through the layer (``from_logits``)."""
         out: dict[str, float] = {}
         if not (layer.represent_uses_x or head.uses_features):
             tr, va = tr.without_x(), va.without_x()  # minibatches then index (N, K) tensors only
@@ -750,18 +750,17 @@ class Sequential(_Base):
             g = torch.Generator().manual_seed(seed + 2_000)
             tr, va = tr.view(layer, g), va.view(layer, g)
         tr, va = self._frozen_concepts(layer, tr), self._frozen_concepts(layer, va)
-        return log | self._fit_head(layer, head, tr, va, lambda b: layer.represent(b.c, b.x), seed + 1)
+        return log | self._fit_head(layer, head, tr, va, lambda b: layer.from_logits(b.z, b.x)[1], seed + 1)
 
     @torch.no_grad()
     def _frozen_concepts(self, layer: ConceptLayer, b: Batch) -> Batch:
-        """``b`` with the frozen concept layer's predictions ``c``, computed once rather than every step."""
+        """``b`` with the frozen concept layer's logits ``z``, computed once rather than every step."""
         layer.eval()  # no dropout, also when the x -> c phase was skipped
         if b.xn is not None:
-            c = layer.activate(layer.logits_from_normalized(b.xn))
+            z = layer.logits_from_normalized(b.xn)
         else:  # instance bags, in chunks so that the normalized bag never exists in full
-            c = torch.cat([layer.activate(b[i:i + self.batch_size].concept_logits(layer))
-                           for i in range(0, len(b), self.batch_size)])
-        return dataclasses.replace(b, c=c)
+            z = torch.cat([b[i:i + self.batch_size].concept_logits(layer) for i in range(0, len(b), self.batch_size)])
+        return dataclasses.replace(b, z=z)
 
 
 @TRAINING.register("independent")
@@ -799,11 +798,11 @@ class Joint(_Base):
         self.concept_weight, self.normalize_loss = concept_weight, normalize_loss
 
     def _aux_loss(self, aux_head, layer, head, b):
-        """The auxiliary concepts go through the head as ``activate``-d logits. They skip the layer's
+        """The auxiliary concepts go through the head via ``layer.from_logits``. They skip the layer's
         ``logits_from_normalized``, so a generation that changes its scores there needs a matching
         change here (none does; with targets, ``c_mean`` / ``c_std`` stay 0 / 1)."""
         logits = aux_head(b.xa)
-        loss = self._task_loss(head(layer.represent(layer.activate(logits), None), None, b.bag), b)
+        loss = self._task_loss(head(layer.from_logits(logits, None)[1], None, b.bag), b)
         if self.concept_weight > 0:
             loss = loss + self.concept_weight * self._concept_loss(layer, b, logits)
         return loss
@@ -816,7 +815,7 @@ class Joint(_Base):
         def total(b: Batch, train: bool = False) -> Step:
             xn = b.normalized(layer) if head.uses_features else None
             c_logits = b.concept_logits(layer, xn)
-            rep = layer.represent(layer.activate(c_logits), b.x)  # = layer(b.x)[1]
+            rep = layer.from_logits(c_logits, b.x)[1]  # = layer(b.x)[1]
             logits = head(rep, xn, b.bag)
             loss = self._task_loss(logits, b)
             if use_c:  # under dropout, the concept loss must see the mask the head saw

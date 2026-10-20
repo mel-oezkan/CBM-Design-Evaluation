@@ -63,8 +63,8 @@ commands in `CUB/README.md`, plus `CUB/train.py`, `CUB/dataset.py` and `CUB/temp
 | x → c: SGD lr 0.01, momentum 0.9, weight decay 4e-5, batch 64, `drop_last` | `optimizer: sgd, momentum: 0.9, concept_lr: 0.01, concept_weight_decay: 0.00004, batch_size: 64, drop_last: true` |
 | x → c with `-ckpt 1`: train + val, best running training accuracy, ≤ 1000 epochs, stop after 100 without improvement | `concept_train_on_val: true, concept_select: train_acc, concept_epochs: 1000, patience: 100` |
 | Independent c → y: trained on true concepts, tested on `sigmoid`; SGD lr 0.001, wd 5e-5, ≤ 500 epochs, best val accuracy | `generation: scores`, `lr: 0.001, weight_decay: 0.00005, epochs: 500, select: val_acc` |
-| Sequential c → y: on predicted logits under the train-time transform (`ExtractConcepts`); SGD lr 0.001, wd 4e-5, ≤ 1000 epochs | `generation: logits`, `head_on_augmented: true`, `weight_decay: 0.00004, epochs: 1000, select: val_acc` |
-| Joint: one SGD (lr 0.001, wd 4e-4), loss `(CE + λ Σ_k w_k BCE_k) / (1 + λK)`, train + val, best training accuracy | `joint_weighted, concept_weight: 1.12, normalize_loss: true, train_on_val: true, select: train_acc` |
+| Sequential c → y: on predicted logits under the train-time transform (`ExtractConcepts`); SGD lr 0.001, wd 4e-5, ≤ 1000 epochs | `generation: {name: logits, raw: true}`, `head_on_augmented: true`, `weight_decay: 0.00004, epochs: 1000, select: val_acc` |
+| Joint: one SGD (lr 0.001, wd 4e-4), loss `(CE + λ Σ_k w_k BCE_k) / (1 + λK)`, train + val, best training accuracy | `generation: {name: logits, raw: true}`, `joint_weighted, concept_weight: 1.12, normalize_loss: true, train_on_val: true, select: train_acc` |
 | `-use_aux`: + 0.4 × every loss term on `AuxLogits`; in joint, its concepts also go through f | `training.aux: {weight: 0.4, init_std: 0.001}` (fine-tuned anchors only; it refuses `augment:`) |
 | Linear c → y (`MLP` with `expand_dim=0`), default init | `predictor: dense` |
 | Task error / concept error (`inference.py`) | `1 - shift.test.acc` / `concepts.test.concept_error` |
@@ -88,14 +88,16 @@ commands in `CUB/README.md`, plus `CUB/train.py`, `CUB/dataset.py` and `CUB/temp
 
 ### Remaining differences: fine-tuned arm
 
-The fine-tuned anchors do not use the frozen arm's options yet
+The fine-tuned sequential and joint anchors pass the raw concept logits to the head
+(`generation: {name: logits, raw: true}`, [#47](https://github.com/mel-oezkan/CBM-Design-Evaluation/issues/47)).
+They also use the frozen arm's SGD settings for the concept layer and head (`optimizer: sgd`,
+`concept_lr`, `normalize_loss`, as in the table above). Runs made before that used the clamped
+logits and Adam, and keep their old run ids. Otherwise the fine-tuned anchors do not use the frozen
+arm's options yet
 ([issue #11](https://github.com/mel-oezkan/CBM-Design-Evaluation/issues/11)):
 
 - **Model selection:** early stopping on the validation loss, versus up to 1000 epochs retrained
   on train+val and selected by training accuracy. `train_on_val` does not support `finetune:` yet.
-- **Optimizers:** the concept layer and head use Adam; the paper uses SGD throughout. The encoder
-  uses SGD as in the paper. `stages.training.optimizer: sgd` (with `momentum`, `weight_decay`)
-  expresses the paper's choice; the anchors don't set it yet, so their run ids and results stay as they are.
 - **Inputs:** ImageNet normalization instead of mean 0.5 / std 2; evaluation images are resized
   to 299 rather than center-cropped. The auxiliary concept head reads standardized features; the
   paper's reads them raw.
@@ -157,6 +159,7 @@ Each ablation undoes one detail of the authors' code; the alternative is the pip
 | `stages.generation.init_std` | `null`: PyTorch's default init |
 | `stages.training.(concept_)train_on_val` | `false`: train split only, still selected by training accuracy |
 | `stages.generation` | `scores`: probabilities instead of logits into the head (sequential, joint) |
+| `stages.generation.raw` | `false`: logits clamped at ±13.8 before the head ([#47](https://github.com/mel-oezkan/CBM-Design-Evaluation/issues/47)) (sequential, joint) |
 | `stages.training.head_on_augmented` | `false`: sequential head on clean predictions |
 | `stages.training.normalize_loss` | `false`: joint loss not divided by `1 + λK` |
 | `stages.training.name` | the unweighted training variant |

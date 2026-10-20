@@ -13,5 +13,6 @@ factors:
        concept_lr: 0.01, concept_weight_decay: 0.00004, concept_epochs: 1000, concept_select: train_acc,
        concept_train_on_val: true, lr: 0.001, weight_decay: 0.00004, epochs: 1000, select: val_acc, device: auto}
   stages.generation: [{name: scores, dropout: 0.5, standardize: false, init_std: 0.1}]  # probabilities into the head
+  stages.generation.raw: [false]                       # logits clamped at +-13.8 before the head (issue #47)
   stages.generation.dropout: [0.0]                     # no dropout before the concept layer
   stages.training.concept_train_on_val: [false]        # x -> c on train only
