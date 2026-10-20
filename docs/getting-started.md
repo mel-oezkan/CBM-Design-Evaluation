@@ -195,9 +195,16 @@ The other anchors in `configs/anchors/` target real datasets:
 
 To use one:
 
-1. Download the dataset and point `dataset.root` at it (the anchors expect it under `data/`, e.g.
-   `data/waterbirds`, `data/CUB_200_2011`). The expected folder layouts are on the
-   [Data](data.md) page.
+1. Prepare the dataset under `data/`, where the anchors expect it (e.g. `data/waterbirds`,
+   `data/CUB_200_2011`):
+
+    ```bash
+    uv run python scripts/prepare_data.py waterbirds --root data   # or cub, cub-parts, metashift
+    ```
+
+    The script downloads and verifies the archive, extracts it and checks that the loader
+    accepts the folder. `--check` only validates an existing folder. The targets and folder
+    layouts are on the [Data](data.md) page.
 2. Install the extras the anchor needs, e.g. `uv sync --extra clip --extra llm`.
 3. For `llm`/`vlm` discovery, set `ANTHROPIC_API_KEY`. Responses are cached under
    `.cache/`, so each prompt is only sent once.
