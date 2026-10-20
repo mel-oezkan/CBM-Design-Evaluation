@@ -32,7 +32,8 @@ from typing import Callable, Iterator
 import torch
 import torch.nn.functional as F
 from torch import nn
-from torch.utils.data import DataLoader
+from torch.utils.data import ConcatDataset, DataLoader
+from torch.utils.data import Dataset as TorchDataset
 
 from ..registry import TRAINING
 from ..structures import Bag
@@ -286,8 +287,10 @@ class Finetune:
     The encoder gets its own optimizer (``sgd`` with ``momentum``, or ``adam``; both with
     ``weight_decay``) at ``lr``, decayed by ``lr_gamma`` every ``lr_step`` epochs if set; the concept
     layer and head keep the stage's optimizers. Batches of ``batch_size`` training images, augmented
-    with the backbone's ``train_transform`` if ``augment``. Early stopping with ``patience`` by the
-    stage's ``select`` / ``concept_select``, restoring the best encoder, layer and head.
+    with the backbone's ``train_transform`` if ``augment``; they also draw from the validation images
+    when the fine-tuned phase trains on them (``train_on_val`` for joint, ``concept_train_on_val`` for
+    x -> c). Early stopping with ``patience`` by the stage's ``select`` / ``concept_select``, restoring
+    the best encoder, layer and head.
     """
 
     epochs: int = 100
@@ -320,10 +323,12 @@ class Aux:
     on its concept logits: the concept loss, and in joint training also the task loss of those concepts
     through the shared head (Koh et al.'s ``End2EndModel``). Validation and model selection read the
     main branch only, and the head is discarded after training. Fine-tuning also trains the tap.
+    ``standardize``: z-score the tap's features with training statistics (False: raw, as Koh et al.).
     """
 
     weight: float = 0.4
     init_std: float | None = 0.001
+    standardize: bool = True
 
     def __post_init__(self):
         if self.weight <= 0:
@@ -332,7 +337,8 @@ class Aux:
 
 class _AuxHead(nn.Module):
     """Auxiliary concept logits (N, K) from auxiliary-tap features (N, D_aux): a linear map on features
-    standardized with training statistics, as ``ConceptLayer`` standardizes its inputs."""
+    standardized with training statistics (``fit_input_stats``; raw until then), as ``ConceptLayer``
+    standardizes its inputs."""
 
     def __init__(self, in_dim: int, k: int, init_std: float | None):
         super().__init__()
@@ -375,33 +381,57 @@ class Augment:
             raise ValueError("`stages.training.augment.views` must be at least 1")
 
 
+class _Offset(TorchDataset):
+    """``dataset`` with its items' ``index`` shifted by ``offset`` (its place in a concatenation)."""
+
+    def __init__(self, dataset: TorchDataset, offset: int):
+        self.dataset, self.offset = dataset, offset
+
+    def __len__(self) -> int:
+        return len(self.dataset)
+
+    def __getitem__(self, i: int) -> dict:
+        item = self.dataset[i]
+        return item | {"index": item["index"] + self.offset}
+
+
 class _ImageFeed:
-    """Train / val images encoded on the fly by the trainable encoder, as ``Batch``es of features."""
+    """Train / val images encoded on the fly by the trainable encoder, as ``Batch``es of features.
+    With ``on_val`` the training batches draw from train + val (Koh et al.'s retraining), and
+    ``optimize_images`` validates on nothing."""
 
     def __init__(self, ctx, aligned: AlignedConcepts, encoder: nn.Module, spec: Finetune, device, seed: int,
-                 aux: bool = False):
-        self.encoder, self.spec, self.device, self.aux = encoder, spec, device, aux
+                 aux: bool = False, on_val: bool = False):
+        self.encoder, self.spec, self.device, self.aux, self.on_val = encoder, spec, device, aux, on_val
         self.labels = {s: ctx.split(s).labels for s in ("train", "val")}
         self.targets = {s: aligned.targets(s) for s in ("train", "val")}
+        fit, fit_split = ctx.image_split("train", augment=spec.augment), "train"
+        if on_val:  # val items follow the train items, so their indices continue after them
+            fit = ConcatDataset([fit, _Offset(ctx.image_split("val", augment=spec.augment), len(fit))])
+            fit_split = "train+val"
+            self.labels[fit_split] = torch.cat([self.labels["train"], self.labels["val"]])
+            t = self.targets["train"]
+            self.targets[fit_split] = None if t is None else torch.cat([t, self.targets["val"]])
         g = torch.Generator().manual_seed(seed)
         pin = device.type == "cuda"
         ordered = lambda split: DataLoader(ctx.image_split(split), batch_size=2 * spec.batch_size, shuffle=False,
                                            num_workers=spec.num_workers, pin_memory=pin)
-        self.loaders = {  # "train": augmented, shuffled training batches; the rest in dataset order
-            "train": DataLoader(ctx.image_split("train", augment=spec.augment), batch_size=spec.batch_size,
-                                shuffle=True, drop_last=True, generator=g, num_workers=spec.num_workers, pin_memory=pin),
-            "val": ordered("val"),
-            "train_ordered": ordered("train"),
+        self.loaders = {  # name -> (loader, split of its labels); "train": augmented, shuffled training batches
+            "train": (DataLoader(fit, batch_size=spec.batch_size, shuffle=True, drop_last=True, generator=g,
+                                 num_workers=spec.num_workers, pin_memory=pin), fit_split),
+            "val": (ordered("val"), "val"),
+            "train_ordered": (ordered("train"), "train"),
         }
 
-    def batches(self, split: str, loader: str | None = None) -> Iterator[Batch]:
+    def batches(self, name: str) -> Iterator[Batch]:
         """Image batches -> feature batches; gradients reach the encoder in train mode. With ``aux``,
         training batches also carry the encoder's auxiliary-tap features ``xa``."""
+        loader, split = self.loaders[name]
         t = self.targets[split]
-        for item in self.loaders[loader or split]:
+        for item in loader:
             idx = item["index"]
             images = item["image"].to(self.device, non_blocking=True)
-            if self.aux and (loader or split) == "train":
+            if self.aux and name == "train":
                 x, xa = self.encoder.forward_aux(images)
                 xa = xa.float()
             else:
@@ -413,16 +443,29 @@ class _ImageFeed:
     def encode(self, split: str) -> Batch:
         """The whole split, in order, under the eval-mode encoder (for fitting a head on fixed features)."""
         self.encoder.eval()
-        x = torch.cat([b.x for b in self.batches(split, "train_ordered" if split == "train" else split)])
+        x = torch.cat([b.x for b in self.batches("train_ordered" if split == "train" else split)])
         t = self.targets[split]
         return Batch(x, self.labels[split].to(self.device), None if t is None else t.to(self.device))
+
+
+@torch.no_grad()
+def _validate(feed: _ImageFeed, val_step: Callable[[Batch], Step]) -> tuple[float, float | None]:
+    """(loss, accuracy or None) of ``val_step`` over the validation images."""
+    total, hits, n, has_acc = 0.0, 0.0, 0, False
+    for b in feed.batches("val"):
+        loss, acc = val_step(b)
+        total, n = total + float(loss) * len(b), n + len(b)
+        if acc is not None:
+            hits, has_acc = hits + float(acc) * len(b), True
+    return total / max(n, 1), hits / max(n, 1) if has_acc else None
 
 
 def optimize_images(groups: list[ParamGroup], modules: list[nn.Module], feed: _ImageFeed,
                     train_step: Callable[[Batch], Step], val_step: Callable[[Batch], Step],
                     after_step: Callable[[], None] | None = None, select: str = "val_loss",
                     log: Callable[..., None] | None = None) -> dict[str, float]:
-    """``optimize`` over image batches, with the encoder fine-tuned alongside ``modules``."""
+    """``optimize`` over image batches, with the encoder fine-tuned alongside ``modules``; without a
+    validation step if the feed also trains on the validation images (``on_val``)."""
     spec, encoder = feed.spec, feed.encoder
     opts = _optimizers(groups)
     enc_opt = spec.make_optimizer([p for p in encoder.parameters() if p.requires_grad])
@@ -451,14 +494,7 @@ def optimize_images(groups: list[ParamGroup], modules: list[nn.Module], feed: _I
                 correct, seen = correct + float(acc) * len(b), seen + len(b)
         for m in modules:
             m.eval()
-        with torch.no_grad():
-            total, hits, n, has_acc = 0.0, 0.0, 0, False
-            for b in feed.batches("val"):
-                loss, acc = val_step(b)
-                total, n = total + float(loss) * len(b), n + len(b)
-                if acc is not None:
-                    hits, has_acc = hits + float(acc) * len(b), True
-            val = (total / max(n, 1), hits / max(n, 1) if has_acc else None)
+        val = None if feed.on_val else _validate(feed, val_step)
         if sel.update(epoch, correct / seen if seen else None, val, train_loss=float(loss_sum) / max(n_seen, 1),
                       lr=_lr(opts[0]) if opts else None, encoder_lr=_lr(enc_opt), seconds=time.perf_counter() - start):
             break
@@ -527,9 +563,8 @@ class _Base(Training):
             if on_val and sel != "train_acc":
                 raise ValueError(f"`stages.training.{key}` leaves no validation split to select on; set "
                                  f"`stages.training.{key.replace('train_on_val', 'select')}: train_acc`")
-        if self.finetune is not None and (self.augment is not None or self.train_on_val or self.concept_train_on_val):
-            raise ValueError("`stages.training.finetune` augments images itself and selects on the validation "
-                             "split; remove `augment:` / `train_on_val` / `concept_train_on_val`, or `finetune:`")
+        if self.finetune is not None and self.augment is not None:
+            raise ValueError("`stages.training.finetune` augments images itself; remove `augment:` or `finetune:`")
 
     @property
     def trains_backbone(self) -> bool:
@@ -547,6 +582,11 @@ class _Base(Training):
     def _val_views(self) -> bool:
         """Whether a phase reads augmented views of the validation images (it trains on them)."""
         return self.train_on_val or self.concept_train_on_val
+
+    @property
+    def _finetune_on_val(self) -> bool:
+        """Whether the fine-tuned phase (x -> c here, joint in ``Joint``) trains on train + val."""
+        return self.concept_train_on_val
 
     def _views(self, ctx, split: str) -> torch.Tensor | None:
         a = self.augment
@@ -577,7 +617,8 @@ class _Base(Training):
                 raise ValueError("`stages.training.aux` does not support instance bags; remove `instances:` or `aux:`")
             # built here, after the layer and head, so that runs without `aux:` draw the same random numbers
             aux_head = _AuxHead(tr.xa.shape[1], layer.n_concepts, self.aux.init_std).to(device)
-            aux_head.fit_input_stats(tr.xa)
+            if self.aux.standardize:
+                aux_head.fit_input_stats(tr.xa)
         feed = None
         if self.finetune is not None:
             if encoder is None:
@@ -587,7 +628,7 @@ class _Base(Training):
                 raise ValueError("`stages.training.finetune` does not support instance bags; remove `instances:` "
                                  "or `finetune:`")
             feed = _ImageFeed(ctx, aligned, encoder.to(device), self.finetune, device, ctx.seed,
-                              aux=aux_head is not None)
+                              aux=aux_head is not None, on_val=self._finetune_on_val)
         layer.to(device)
         head.to(device)
         try:
@@ -796,6 +837,10 @@ class Joint(_Base):
     def __init__(self, concept_weight: float = 1.0, normalize_loss: bool = False, **kw):
         super().__init__(**kw)
         self.concept_weight, self.normalize_loss = concept_weight, normalize_loss
+
+    @property
+    def _finetune_on_val(self) -> bool:
+        return self.train_on_val
 
     def _aux_loss(self, aux_head, layer, head, b):
         """The auxiliary concepts go through the head via ``layer.from_logits``. They skip the layer's
