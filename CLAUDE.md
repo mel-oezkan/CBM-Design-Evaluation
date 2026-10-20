@@ -108,7 +108,8 @@ Kind-specific contracts:
   `cache_key()` must include every constructor arg that changes the data.
 - **Backbone**: frozen; set `dim` (and `patch_grid`, `has_text` where applicable).
   `cache_key()` must identify the weights exactly. Patch and text embeddings must live in the
-  same space as `encode_images`. Import optional heavy deps (`open_clip`, `transformers`) inside
+  same space as `encode_images`. A network built lazily (on first use) is built under
+  `rng_preserved()`. Import optional heavy deps (`open_clip`, `transformers`) inside
   methods, not at module top level.
 - **Generation**: subclass `ConceptLayer`, implement `represent` and set `rep_dim`; concept
   predictions stay in target space so interventions keep working. Set `represent_uses_x = False`
@@ -118,9 +119,10 @@ Kind-specific contracts:
   rather than editing the training stages. Set `supports_bags = True` only if it pools over M, and
   `uses_features = False` on the head only if `forward` ignores `x_norm`.
 - **Training**: must respect `layer.frozen`, `aligned.has_targets`, `head.optimizer/lr` and
-  `head.phases()`; return a flat `dict[str, float]` log. Losses are hooks on the training base
-  class: `_task_loss(logits, batch)` (cross-entropy) and `_concept_loss(layer, batch)` (selected by
-  `concept_loss:`, reading concept logits as `batch.concept_logits(layer)`). A new loss is a subclass of `Sequential`/`Joint`/`Independent` that overrides
+  `head.phases()`; return a flat `dict[str, float]` log, and report every epoch to `ctx.history`
+  (pass `log=self._history.phase(<phase>)` to `optimize` / `optimize_images`). Losses are hooks on the training base
+  class: `_task_loss(logits, batch)` (cross-entropy) and `_concept_loss(layer, batch, logits=None)` (selected by
+  `concept_loss:`, using the caller's `logits` if given, else `batch.concept_logits(layer)`). A new loss is a subclass of `Sequential`/`Joint`/`Independent` that overrides
   one hook and is registered under its own name; don't add a `loss:` string switch.
 - **Concept scorer**: if it caches scores, keep its output-relevant args in `self.kw` and build the
   key from `cache_key()` (see `GroundingDINOScorer`).
@@ -151,6 +153,10 @@ Kind-specific contracts:
   Never cache a partial or failed result: `ClaudeClient` raises on refused or cut-off responses
   instead of storing them, which is also why `max_tokens` can stay out of its key.
 - Randomness flows from `cfg.seed` (`seed_everything`); don't create unseeded generators.
+- A cache miss must not advance the global RNG: compute it under `utils.rng_preserved()` (as
+  `load_features`, the instance sources and `GroundingDINOScorer` do), so the first run of a config
+  on a cold cache equals every later run. The same holds for a network a backbone builds on first use
+  (`InceptionBackbone.frozen`) and for side work such as W&B tracking.
 - Training defaults to CPU; devices come from `utils.resolve_device` and the config, not hard-coded `.cuda()`.
 
 ## Where things do NOT go

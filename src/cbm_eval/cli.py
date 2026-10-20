@@ -14,10 +14,22 @@ from . import analysis, registry
 from .config import load_ablation, load_config, load_yaml, parse_override
 from .pipeline import EVAL_KEYS, evaluate_saved, run, sweep
 from .results import ResultsStore
+from .tracking import WandbTracker
 
 
 def _overrides(items: list[str] | None) -> dict:
     return dict(parse_override(s) for s in items or [])
+
+
+def _tracker(args) -> WandbTracker | None:
+    return WandbTracker(args.wandb, group=args.wandb_group, mode=args.wandb_mode) if args.wandb else None
+
+
+def _add_tracking(parser) -> None:
+    g = parser.add_argument_group("live tracking (needs the `tracking` extra)")
+    g.add_argument("--wandb", metavar="PROJECT", help="stream each run's epoch history and metrics to this W&B project")
+    g.add_argument("--wandb-group", help="W&B group (default: the config's name)")
+    g.add_argument("--wandb-mode", choices=["online", "offline", "disabled"], help="W&B mode (default: W&B's)")
 
 
 def cmd_run(args) -> None:
@@ -25,7 +37,7 @@ def cmd_run(args) -> None:
     store = ResultsStore(cfg.paths["results"])
     seeds = args.seeds or [cfg.seed]
     configs = [cfg.with_overrides({"seed": s}) for s in seeds]
-    status = sweep(configs, store, skip_existing=not args.force, continue_on_error=False)
+    status = sweep(configs, store, skip_existing=not args.force, continue_on_error=False, tracker=_tracker(args))
     print(json.dumps(status, indent=1, default=float))
 
 
@@ -40,7 +52,7 @@ def cmd_sweep(args) -> None:
         print(f"{len(configs)} runs")
         return
     store = ResultsStore(ab.anchor.paths["results"])
-    status = sweep(configs, store, skip_existing=not args.force)
+    status = sweep(configs, store, skip_existing=not args.force, tracker=_tracker(args))
     ok = sum(s["status"] == "ok" for s in status)
     skipped = sum(s["status"] == "skipped" for s in status)
     print(f"{ok} ran, {skipped} skipped, {len(status) - ok - skipped} failed")
@@ -95,6 +107,7 @@ def main(argv: list[str] | None = None) -> None:
     r.add_argument("--set", nargs="*", help="dotted overrides, e.g. stages.predictor.lam=0.01")
     r.add_argument("--seeds", nargs="*", type=int)
     r.add_argument("--force", action="store_true", help="re-run even if results exist")
+    _add_tracking(r)
     r.set_defaults(func=cmd_run)
 
     s = sub.add_parser("sweep", help="run an ablation file")
@@ -102,6 +115,7 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--set", nargs="*", help="overrides applied to the anchor")
     s.add_argument("--dry-run", action="store_true")
     s.add_argument("--force", action="store_true")
+    _add_tracking(s)
     s.set_defaults(func=cmd_sweep)
 
     e = sub.add_parser("evaluate", help="evaluate saved runs again (e.g. on new eval_datasets) without retraining")

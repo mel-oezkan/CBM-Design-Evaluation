@@ -5,6 +5,7 @@ components end to end."""
 import pickle
 
 import pytest
+import torch
 
 from cbm_eval.config import load_config
 from cbm_eval.data.cub import CUB
@@ -87,3 +88,41 @@ def test_koh2020_anchor_components_run_on_fake_cub(cub_root, tmp_path):
     m = run(cfg, save=False).metrics
     assert 0 <= m["shift.test.acc"] <= 1
     assert 0 <= m["concepts.test.concept_error"] <= 1
+
+
+def test_inception_preprocessing_options_keep_the_default_cache_key():
+    from torchvision import transforms as T
+
+    from cbm_eval.backbones.inception import InceptionBackbone
+
+    assert InceptionBackbone(weights=None).cache_key() == {"name": "inception", "weights": None, "image_size": 299}
+    koh = InceptionBackbone(weights=None, mean=[0.5, 0.5, 0.5], std=[2, 2, 2], eval_resize=False)
+    ops = koh.transform().transforms
+    assert isinstance(ops[0], T.CenterCrop) and list(ops[-1].mean) == [0.5] * 3 and list(ops[-1].std) == [2] * 3
+    assert list(koh.train_transform().transforms[-1].std) == [2] * 3
+    assert isinstance(InceptionBackbone(weights=None).transform().transforms[0], T.Resize)
+
+
+@pytest.mark.parametrize("anchor", ["cub_koh2020_frozen_independent", "cub_koh2020_frozen_sequential",
+                                    "cub_koh2020_frozen"])
+def test_frozen_koh2020_anchors_run_on_fake_cub(cub_root, tmp_path, anchor, monkeypatch):
+    from cbm_eval.backbones.inception import InceptionBackbone
+
+    encode = InceptionBackbone.encode_images  # random-init features are ~1e10: rescale to the pretrained norm (~20)
+    monkeypatch.setattr(InceptionBackbone, "encode_images",
+                        lambda self, images: 20 * torch.nn.functional.normalize(encode(self, images), dim=-1))
+    cfg = load_config(f"configs/anchors/{anchor}.yaml")
+    training = cfg.stages["training"] | {"epochs": 2, "concept_epochs": 2, "augment": {"views": 2, "num_workers": 0}}
+    cfg = cfg.with_overrides({
+        "dataset": {"name": "cub", "root": str(cub_root), "majority_vote": "koh", "min_class_count": 1,
+                    "val_fraction": 0.3},
+        "backbone.weights": None,  # random init: no download
+        "stages.training": training, "device": "cpu",
+        "paths": {"cache": str(tmp_path / "cache"), "runs": str(tmp_path / "runs"),
+                  "results": str(tmp_path / "r.jsonl")},
+    })
+    res = run(cfg, save=False)
+    assert 0 <= res.metrics["shift.test.acc"] <= 1
+    assert 0 <= res.metrics["concepts.test.concept_error"] <= 1
+    log = res.cbm.train_log
+    assert ("joint_train_acc" if anchor == "cub_koh2020_frozen" else "concept_train_acc") in log

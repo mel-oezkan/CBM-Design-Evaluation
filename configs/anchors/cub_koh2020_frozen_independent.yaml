@@ -1,0 +1,56 @@
+# Koh et al. 2020, "Concept Bottleneck Models" (ICML), CUB, INDEPENDENT bottleneck on a FROZEN Inception-v3.
+# The paper fine-tunes the backbone (Table 1: 0.240 task error, Table 2: 0.034 concept error); this arm
+# keeps it frozen to save compute and otherwise follows the authors' code (github.com/yewsiang/
+# ConceptBottleneck, the commands in CUB/README.md). Siblings: cub_koh2020_frozen_sequential.yaml,
+# cub_koh2020_frozen.yaml (joint); the fine-tuned arm is cub_koh2020*.yaml.
+#
+# As in their code:
+#   data   their train/val split and 112 voted concepts; their weights (= torchvision IMAGENET1K_V1);
+#          inputs scaled by mean 0.5 / std 2 before transform_input; eval images center-cropped to 299
+#          without resizing; training images color-jittered, random-resized-cropped and flipped
+#   x -> c 112 linear units on the raw pooled features after dropout 0.5, weights ~ truncnorm(std 0.1);
+#          imbalance-weighted BCE averaged over concepts; SGD lr 0.01, momentum 0.9, weight decay 4e-5,
+#          batch 64 without the last partial batch; trained on train + val for up to 1000 epochs, keeping
+#          the epoch with the best running training concept accuracy and stopping after 100 epochs
+#          without one (their -ckpt 1)
+#   c -> y linear, trained on the true concepts and tested on sigmoid probabilities; SGD lr 0.001,
+#          momentum 0.9, weight decay 5e-5, batch 64, up to 500 epochs, best validation accuracy
+#          (patience 100)
+# Remaining gaps:
+#   - the backbone is frozen, with BatchNorm in eval mode (theirs is fine-tuned in train mode);
+#   - augmentation draws from 64 cached views per image (shared by all seeds) rather than a fresh
+#     transform every epoch;
+#   - no auxiliary Inception head: with a frozen backbone it cannot change x -> c;
+#   - interventions (leakage) replace random single concepts, not visibility-aware concept groups.
+name: cub_koh2020_frozen_independent
+dataset: {name: cub, root: data/CUB_200_2011, majority_vote: koh, split_dir: data/CUB_processed/class_attr_data_10}
+backbone: {name: inception, mean: [0.5, 0.5, 0.5], std: [2, 2, 2], eval_resize: false}
+stages:
+  discovery: {name: dataset}
+  filtering: [{name: rules, remove_class_names: false, max_words: 10}]
+  generation: {name: scores, dropout: 0.5, standardize: false, init_std: 0.1}
+  alignment: {name: human}
+  predictor: {name: dense}
+  training:
+    name: independent_weighted
+    optimizer: sgd
+    momentum: 0.9
+    batch_size: 64
+    drop_last: true
+    patience: 100
+    concept_lr: 0.01
+    concept_weight_decay: 0.00004
+    concept_epochs: 1000
+    concept_select: train_acc
+    concept_train_on_val: true
+    lr: 0.001
+    weight_decay: 0.00005
+    epochs: 500
+    select: val_acc
+    augment: {views: 64, num_workers: 8}
+    device: auto
+evaluation:
+  - {name: shift, splits: [test]}
+  - {name: concepts}
+  - {name: leakage}
+paths: {cache: .cache, runs: runs/cub_koh2020_frozen, results: results/cub_koh2020_frozen.jsonl}

@@ -1,0 +1,40 @@
+# Koh et al. 2020, CUB, SEQUENTIAL bottleneck on a FROZEN Inception-v3 (paper, fine-tuned: Table 1 0.243
+# task error, Table 2 0.034 concept error). Data and x -> c exactly as cub_koh2020_frozen_independent.yaml,
+# so both arms share their x -> c model; gaps as listed there.
+#   c -> y linear on the predicted concept logits; SGD lr 0.001, momentum 0.9, weight decay 4e-5, batch
+#          64, up to 1000 epochs, best validation accuracy (patience 100). Like their ExtractConcepts
+#          step, the head trains and is selected on predictions for an augmented view of each train
+#          and val image (`head_on_augmented`); test predictions use the center crop.
+name: cub_koh2020_frozen_sequential
+dataset: {name: cub, root: data/CUB_200_2011, majority_vote: koh, split_dir: data/CUB_processed/class_attr_data_10}
+backbone: {name: inception, mean: [0.5, 0.5, 0.5], std: [2, 2, 2], eval_resize: false}
+stages:
+  discovery: {name: dataset}
+  filtering: [{name: rules, remove_class_names: false, max_words: 10}]
+  generation: {name: logits, dropout: 0.5, standardize: false, init_std: 0.1}
+  alignment: {name: human}
+  predictor: {name: dense}
+  training:
+    name: sequential_weighted
+    optimizer: sgd
+    momentum: 0.9
+    batch_size: 64
+    drop_last: true
+    patience: 100
+    concept_lr: 0.01
+    concept_weight_decay: 0.00004
+    concept_epochs: 1000
+    concept_select: train_acc
+    concept_train_on_val: true
+    lr: 0.001
+    weight_decay: 0.00004
+    epochs: 1000
+    select: val_acc
+    head_on_augmented: true
+    augment: {views: 64, num_workers: 8}
+    device: auto
+evaluation:
+  - {name: shift, splits: [test]}
+  - {name: concepts}
+  - {name: leakage}
+paths: {cache: .cache, runs: runs/cub_koh2020_frozen, results: results/cub_koh2020_frozen.jsonl}

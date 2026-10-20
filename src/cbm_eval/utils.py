@@ -3,8 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import random
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import numpy as np
 import torch
@@ -14,6 +15,23 @@ def seed_everything(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+
+
+@contextmanager
+def rng_preserved() -> Iterator[None]:
+    """Run a block without advancing the global generators ``seed_everything`` seeds (Python, NumPy,
+    torch CPU, and CUDA once initialized). Every cache miss runs under it, so that building a cache
+    (a ``DataLoader``'s base seed, a network initialized before its weights load) draws nothing a warm
+    cache would not: the first run of a config equals every later one. Side work such as W&B
+    tracking runs under it too."""
+    py, np_state = random.getstate(), np.random.get_state()
+    devices = list(range(torch.cuda.device_count())) if torch.cuda.is_initialized() else []
+    with torch.random.fork_rng(devices=devices):
+        try:
+            yield
+        finally:
+            random.setstate(py)
+            np.random.set_state(np_state)
 
 
 def rng_state() -> tuple:

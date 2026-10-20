@@ -56,7 +56,8 @@ CASES = {
             {"latent_dim": 32, "dim": 64, "seed": 1, "aux_dim": 8},
             {"grid": "patch_grid metadata only; patch features come from the synthetic dataset"}),
     "inception": (InceptionBackbone, lambda **kw: InceptionBackbone(**kw), lambda o: o.cache_key(),
-                  {"weights": None, "image_size": 331}, {}),  # weights load lazily, so nothing is downloaded
+                  {"weights": None, "image_size": 331, "mean": [0.5, 0.5, 0.5], "std": [2.0, 2.0, 2.0],
+                   "eval_resize": False}, {}),  # weights load lazily, so nothing is downloaded
     "grounding_dino": (GroundingDINOScorer, lambda **kw: GroundingDINOScorer(**kw), lambda o: o.cache_key(),
                        {"model": "IDEA-Research/grounding-dino-base", "box_threshold": 0.4, "concepts_per_prompt": 4},
                        {"batch_size": BATCHING["batch_size"]}),

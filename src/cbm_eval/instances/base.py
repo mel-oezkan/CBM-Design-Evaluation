@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 import torch
 
 from ..structures import InstanceSplit
-from ..utils import stable_hash
+from ..utils import rng_preserved, stable_hash
 
 if TYPE_CHECKING:
     from ..context import Context
@@ -56,7 +56,8 @@ def load_instances(ctx: "Context", source: InstanceSource, split: str) -> Instan
         if path.exists():
             inst = InstanceSplit(**torch.load(path, weights_only=False))
         else:
-            inst = source.build(ctx, split)
+            with rng_preserved():  # a cold cache must not shift the run's random draws
+                inst = source.build(ctx, split)
             data = asdict(inst)
             for k in ("features", "teacher_features"):
                 if data[k] is not None:
