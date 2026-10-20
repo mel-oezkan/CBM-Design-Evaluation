@@ -1,33 +1,47 @@
 # Koh et al. 2020, CUB, SEQUENTIAL bottleneck (Table 1: 0.243 task error, Table 2: 0.034 concept error):
 # x -> c fitted first, then a linear c -> y head on the predicted, unclamped concept logits (`raw: true`).
-# The x -> c phase fine-tunes Inception-v3 end to end with Koh et al.'s x -> c settings (SGD, lr 0.01,
-# momentum 0.9, weight decay 4e-5, batch 64; same loss scale as theirs) and the auxiliary Inception
-# head (`aux`, their -use_aux), which reaches the encoder through Mixed_6e; concept layer and auxiliary
-# head use the same SGD settings (`concept_lr`, `concept_weight_decay`). The c -> y head uses their
-# Sequential_CtoY settings (SGD, lr 0.001, momentum 0.9, weight decay 4e-05, batch 64). Data and gaps as in
-# cub_koh2020.yaml (joint).
+# Data, inputs and concept layer as in cub_koh2020.yaml (joint).
+#   x -> c fine-tunes Inception-v3 end to end with Koh et al.'s x -> c settings (SGD, lr 0.01, momentum
+#          0.9, weight decay 4e-5, batch 64; same loss scale as theirs) and the auxiliary Inception head
+#          (`aux`, their -use_aux, on the raw tap features), which reaches the encoder through Mixed_6e;
+#          concept layer and auxiliary head use the same SGD settings (`concept_lr`,
+#          `concept_weight_decay`). Trained on train + val for up to 1000 epochs, keeping the epoch with
+#          the best running training concept accuracy and stopping after 100 epochs without one (-ckpt 1).
+#   c -> y their Sequential_CtoY settings: SGD lr 0.001, momentum 0.9, weight decay 4e-5, batch 64
+#          without the last partial batch, up to 1000 epochs, best validation accuracy (patience 100).
+# Remaining gaps:
+#   - the c -> y head trains and is selected on concept predictions for the center-cropped train and
+#     val images (theirs, `ExtractConcepts`: one augmented view of each); `head_on_augmented` needs the
+#     cached views of `augment:`, which fine-tuning replaces;
+#   - interventions (leakage evaluator) replace random single concepts, not visibility-aware groups.
 name: cub_koh2020_sequential
 dataset: {name: cub, root: data/CUB_200_2011, majority_vote: koh, split_dir: data/CUB_processed/class_attr_data_10}
-backbone: {name: inception}
+backbone: {name: inception, mean: [0.5, 0.5, 0.5], std: [2, 2, 2], eval_resize: false}
 stages:
   discovery: {name: dataset}
   filtering: [{name: rules, remove_class_names: false, max_words: 10}]
-  generation: {name: logits, raw: true}
+  generation: {name: logits, raw: true, standardize: false, init_std: 0.1}  # dropout: the encoder's own
   alignment: {name: human}
   predictor: {name: dense}
   training:
     name: sequential_weighted
     optimizer: sgd
     momentum: 0.9
+    batch_size: 64
+    drop_last: true
+    patience: 100
     concept_lr: 0.01
     concept_weight_decay: 0.00004
+    concept_select: train_acc
+    concept_train_on_val: true
     lr: 0.001
     weight_decay: 0.00004
-    batch_size: 64
-    aux: {weight: 0.4, init_std: 0.001}
+    epochs: 1000
+    select: val_acc
+    aux: {weight: 0.4, init_std: 0.001, standardize: false}
     device: auto
-    finetune: {epochs: 300, lr: 0.01, optimizer: sgd, momentum: 0.9, weight_decay: 0.00004, batch_size: 64,
-               patience: 30, num_workers: 8}
+    finetune: {epochs: 1000, lr: 0.01, optimizer: sgd, momentum: 0.9, weight_decay: 0.00004, batch_size: 64,
+               patience: 100, num_workers: 8}
 evaluation:
   - {name: shift, splits: [test]}
   - {name: concepts}

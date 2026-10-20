@@ -1,34 +1,39 @@
 # Koh et al. 2020, CUB, INDEPENDENT bottleneck (Table 1: 0.240 task error, Table 2: 0.034 concept error):
 # the c -> y head is trained on the true concepts and tested on sigmoid concept probabilities,
 # hence `generation: scores` (probabilities) rather than `logits`.
-# The x -> c phase fine-tunes Inception-v3 end to end with Koh et al.'s x -> c settings (SGD, lr 0.01,
-# momentum 0.9, weight decay 4e-5, batch 64; same loss scale as theirs) and the auxiliary Inception
-# head (`aux`, their -use_aux), which reaches the encoder through Mixed_6e; concept layer and auxiliary
-# head use the same SGD settings (`concept_lr`, `concept_weight_decay`). The c -> y head uses their
-# Independent_CtoY settings (SGD, lr 0.001, momentum 0.9, weight decay 5e-05, batch 64). Data and gaps as in
-# cub_koh2020.yaml (joint).
+# Data, inputs and concept layer as in cub_koh2020.yaml (joint); x -> c as in cub_koh2020_sequential.yaml.
+#   c -> y their Independent_CtoY settings: SGD lr 0.001, momentum 0.9, weight decay 5e-5, batch 64
+#          without the last partial batch, up to 500 epochs, best validation accuracy (patience 100).
+# Remaining gaps:
+#   - interventions (leakage evaluator) replace random single concepts, not visibility-aware groups.
 name: cub_koh2020_independent
 dataset: {name: cub, root: data/CUB_200_2011, majority_vote: koh, split_dir: data/CUB_processed/class_attr_data_10}
-backbone: {name: inception}
+backbone: {name: inception, mean: [0.5, 0.5, 0.5], std: [2, 2, 2], eval_resize: false}
 stages:
   discovery: {name: dataset}
   filtering: [{name: rules, remove_class_names: false, max_words: 10}]
-  generation: {name: scores}
+  generation: {name: scores, standardize: false, init_std: 0.1}  # dropout: the encoder's own
   alignment: {name: human}
   predictor: {name: dense}
   training:
     name: independent_weighted
     optimizer: sgd
     momentum: 0.9
+    batch_size: 64
+    drop_last: true
+    patience: 100
     concept_lr: 0.01
     concept_weight_decay: 0.00004
+    concept_select: train_acc
+    concept_train_on_val: true
     lr: 0.001
     weight_decay: 0.00005
-    batch_size: 64
-    aux: {weight: 0.4, init_std: 0.001}
+    epochs: 500
+    select: val_acc
+    aux: {weight: 0.4, init_std: 0.001, standardize: false}
     device: auto
-    finetune: {epochs: 300, lr: 0.01, optimizer: sgd, momentum: 0.9, weight_decay: 0.00004, batch_size: 64,
-               patience: 30, num_workers: 8}
+    finetune: {epochs: 1000, lr: 0.01, optimizer: sgd, momentum: 0.9, weight_decay: 0.00004, batch_size: 64,
+               patience: 100, num_workers: 8}
 evaluation:
   - {name: shift, splits: [test]}
   - {name: concepts}
