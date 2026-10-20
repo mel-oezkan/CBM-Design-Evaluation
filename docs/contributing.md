@@ -56,10 +56,17 @@ which AI coding assistants read, so both stay in sync.
 
 ## Architecture review
 
-Every pull request gets an automated architecture review as a PR comment
-(`.github/workflows/architecture-review.yml`). The reviewer checks each commit against the rules
-above and asks whether a one-stage ablation still measures only that stage and whether existing
-results still match their `run_id`. It is advisory and does not block merging.
+Pull requests that change the architecture (a new stage, interface or cache, a change to how
+runs are keyed) get an architecture review as a PR comment. The workflow
+(`.github/workflows/architecture-review.yml`) does not run on its own. Start it by hand for one PR:
+
+```bash
+gh workflow run architecture-review.yml -f pr=<number>
+```
+
+The reviewer checks each commit against the rules above and asks whether a one-stage ablation
+still measures only that stage and whether existing results still match their `run_id`. It is
+advisory and does not block merging. It needs the repository secret `ANTHROPIC_API_KEY`.
 
 To run the same review locally before pushing, ask Claude Code to use the
 `architecture-reviewer` agent (`.claude/agents/architecture-reviewer.md`), or headless:
