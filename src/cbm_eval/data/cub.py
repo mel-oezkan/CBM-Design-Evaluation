@@ -43,6 +43,8 @@ _ATTR_TO_PARTS = {
     "leg": ["left leg", "right leg"],
     "crown": ["crown"],
 }
+# Full attribute names whose parts differ from their stem's entry in ``_ATTR_TO_PARTS``.
+_NAME_TO_PARTS = {"has_head_pattern::eyering": ["left eye", "right eye"]}
 
 # Keypoint groups: CUB parts with left and right merged.
 _KEYPOINT_GROUPS = ["back", "beak", "belly", "breast", "crown", "forehead", "eye", "leg", "wing", "nape",
@@ -219,8 +221,8 @@ class CUB(ImageDataset):
     @staticmethod
     def _parts_for(attr_name: str) -> list[str]:
         # attribute names look like "has_bill_shape::dagger"
-        if attr_name == "has_head_pattern::eyering":
-            return ["left eye", "right eye"]
+        if attr_name in _NAME_TO_PARTS:
+            return _NAME_TO_PARTS[attr_name]
         stem = attr_name.split("::")[0].removeprefix("has_")
         for key in sorted(_ATTR_TO_PARTS, key=len, reverse=True):
             if stem.startswith(key):

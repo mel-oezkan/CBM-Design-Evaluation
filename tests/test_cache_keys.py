@@ -12,6 +12,7 @@ import pytest
 from cbm_eval.backbones.inception import InceptionBackbone
 from cbm_eval.backbones.toy import ToyBackbone
 from cbm_eval.data.cub import CUB
+from cbm_eval.data.features import load_features
 from cbm_eval.data.metashift import MetaShift
 from cbm_eval.data.synthetic import SyntheticDataset
 from cbm_eval.data.waterbirds import Waterbirds
@@ -117,3 +118,19 @@ def test_cub_keys_cover_features_and_parts(tmp_path, cub_root):
     base = key()
     for name, value in perturbed.items():
         assert key(**{name: value}) != base, f"CUB({name}=...) does not change a cache key"
+
+
+def test_patch_feature_cache_keys_on_keypoints(tmp_path):
+    """Patch caches store part masks built from ``Sample.keypoints`` (issue #1): a new concept -> part
+    mapping must miss the cache, while caches without patches (no masks) keep their key."""
+    ds, bb = SyntheticDataset(sizes={"train": 8, "val": 8, "test": 8}), ToyBackbone()
+    cache = lambda: sorted(p.name for p in (tmp_path / "features" / ds.name).glob("*.pt"))
+    load_features(ds, bb, "test", tmp_path, patches=False)
+    load_features(ds, bb, "test", tmp_path, patches=True)
+    before = cache()
+    s = next(s for s in ds.samples("test") if s.keypoints)
+    s.keypoints = {k: (x + 1, y, w, h) for k, (x, y, w, h) in s.keypoints.items()}  # a concept moved to another part
+    load_features(ds, bb, "test", tmp_path, patches=False)
+    assert cache() == before
+    load_features(ds, bb, "test", tmp_path, patches=True)
+    assert len(cache()) == len(before) + 1

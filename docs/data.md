@@ -21,6 +21,8 @@ Point `dataset.root` at:
 
 Backbone features are cached under `paths.cache/features/` and keyed by dataset and backbone. All
 runs sharing a dataset and backbone reuse them, so training a CBM runs only on cached tensors.
+Patch-feature caches also store each concept's part mask, so their key also hashes every sample's
+keypoints: a changed concept-to-part mapping gets a new cache instead of reading stale masks.
 LLM, VLM, ConceptNet and Grounding DINO outputs are cached under the same directory.
 
 `llm` and `vlm` discovery call Claude (`claude-opus-5-5` by default; override with `model:`). Server-side

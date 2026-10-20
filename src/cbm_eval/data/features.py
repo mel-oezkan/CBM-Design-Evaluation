@@ -20,6 +20,8 @@ log = logging.getLogger(__name__)
 def load_features(dataset: ImageDataset, backbone, split: str, cache_dir: str | Path,
                   patches: bool = False, batch_size: int = 64, num_workers: int = 0) -> FeatureSplit:
     key = {"dataset": dataset.cache_key(), "backbone": backbone.cache_key(), "split": split, "patches": patches}
+    if patches:  # part masks are stored too; they come from the keypoints, so a new part mapping is a new key
+        key["keypoints"] = stable_hash([s.keypoints for s in dataset.samples(split)])
     path = Path(cache_dir) / "features" / dataset.name / f"{split}-{stable_hash(key)}.pt"
     if path.exists():
         return FeatureSplit(**torch.load(path, weights_only=False))
