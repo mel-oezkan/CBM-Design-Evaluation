@@ -12,6 +12,8 @@ import pytest
 from cbm_eval.backbones.inception import InceptionBackbone
 from cbm_eval.backbones.toy import ToyBackbone
 from cbm_eval.data.cub import CUB
+from cbm_eval.data.funnybirds import FunnyBirds
+from cbm_eval.data.funnybirds_render import write_scenes
 from cbm_eval.data.metashift import MetaShift
 from cbm_eval.data.synthetic import SyntheticDataset
 from cbm_eval.data.waterbirds import Waterbirds
@@ -117,3 +119,17 @@ def test_cub_keys_cover_features_and_parts(tmp_path, cub_root):
     base = key()
     for name, value in perturbed.items():
         assert key(**{name: value}) != base, f"CUB({name}=...) does not change a cache key"
+
+
+def test_funnybirds_keys_cover_args_and_scenes(tmp_path):
+    """The key covers every constructor arg and the scene files, so re-generated scenes in the same
+    root don't hit features cached for the old ones."""
+    scenes = {"n_classes": 2, "train_per_class": 2, "test_per_class": 1}
+    root = write_scenes(tmp_path / "a", **scenes)
+    perturbed = {"root": str(write_scenes(tmp_path / "b", **scenes)), "val_fraction": 0.3, "class_level_concepts": True}
+    assert init_params(FunnyBirds) == set(perturbed)
+    base = FunnyBirds(str(root)).cache_key()
+    for name, value in perturbed.items():
+        assert FunnyBirds(**{"root": str(root), name: value}).cache_key() != base, f"FunnyBirds({name}=...)"
+    write_scenes(root, **scenes, seed=1, overwrite=True)
+    assert FunnyBirds(str(root)).cache_key() != base

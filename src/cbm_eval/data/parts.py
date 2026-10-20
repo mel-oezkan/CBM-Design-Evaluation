@@ -95,6 +95,13 @@ def _load_mask(paths: list[str]) -> np.ndarray | None:
     return out
 
 
+def _label_masks(path: str, colors: dict[str, list[tuple[int, int, int]]]) -> dict[str, np.ndarray]:
+    """Group -> (H', W') bool mask of the pixels whose RGB value is one of the group's colors."""
+    rgb = np.asarray(Image.open(path).convert("RGB")).astype(np.int32)
+    code = (rgb[..., 0] << 16) | (rgb[..., 1] << 8) | rgb[..., 2]
+    return {g: np.isin(code, [(r << 16) | (gr << 8) | b for r, gr, b in cs]) for g, cs in colors.items()}
+
+
 def load_parts(dataset: ImageDataset, split: str, cache_dir: str | Path, ops: list[Op],
                seg_size: int = 56) -> PartSplit | None:
     """Keypoints and (if the dataset has them) segmentation masks for a split, cached on disk."""
@@ -119,8 +126,9 @@ def load_parts(dataset: ImageDataset, split: str, cache_dir: str | Path, ops: li
             pts = ann.points.get(group)
             if pts:
                 points[n, q, : len(pts)] = torch.from_numpy(map_points(np.array(pts), ann.size, ops)).float()
+        labels = _label_masks(ann.label_map, spec.seg_colors) if ann.label_map and spec.seg_colors else None
         for g, group in enumerate(spec.seg_groups):
-            m = _load_mask(ann.masks.get(group, []))
+            m = labels.get(group) if labels is not None else _load_mask(ann.masks.get(group, []))
             if m is not None and m.any():
                 segs[n, g] = map_mask(m, ann.size, ops, seg_size)
     data = dict(points=points, segs=segs, keypoint_groups=list(spec.keypoint_groups),

@@ -18,12 +18,14 @@ class PartAnnotation:
     """One image's part annotations in pixel coordinates of the original image.
 
     ``points`` maps a keypoint group (e.g. "wing") to its visible keypoints (left and right wing);
-    ``masks`` maps a segmentation group to the mask files whose union is that part.
+    ``masks`` maps a segmentation group to the mask files whose union is that part. Datasets with
+    one color-coded part map per image set ``label_map`` instead, decoded by ``PartSpec.seg_colors``.
     """
 
     size: tuple[int, int]  # (w, h)
     points: dict[str, list[tuple[float, float]]] = field(default_factory=dict)
     masks: dict[str, list[str]] = field(default_factory=dict)
+    label_map: str | None = None  # RGB part map file of the image (any resolution with its aspect)
 
 
 @dataclass
@@ -36,10 +38,14 @@ class PartSpec:
     concept_segs: torch.Tensor  # (K_h, G) bool
     max_points: int = 2  # keypoints per group (left / right)
     source: str = ""  # where the masks come from; part of the cache key
+    seg_colors: dict[str, list[tuple[int, int, int]]] | None = None  # seg group -> its RGB colors in label maps
 
     def cache_key(self) -> dict[str, Any]:
-        return {"kp": self.keypoint_groups, "seg": self.seg_groups, "source": self.source,
-                "ck": self.concept_keypoints.int().tolist(), "cs": self.concept_segs.int().tolist()}
+        key = {"kp": self.keypoint_groups, "seg": self.seg_groups, "source": self.source,
+               "ck": self.concept_keypoints.int().tolist(), "cs": self.concept_segs.int().tolist()}
+        if self.seg_colors is not None:  # omitted when unset so existing part caches stay valid
+            key["colors"] = {g: [list(c) for c in cs] for g, cs in sorted(self.seg_colors.items())}
+        return key
 
 
 @dataclass

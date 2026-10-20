@@ -1,0 +1,22 @@
+# Classic CBM on FunnyBirds (Hesse et al., ICCV 2023): the 26 part variants as human concepts,
+# labelled per image (train scenes drop parts), localized against the rendered part maps.
+# Data: the authors' render (scripts/funnybirds_modal.py::download), or a custom render from
+# cbm_eval.data.funnybirds_render; for one with a spurious background color, point dataset.root at it,
+# e.g. --set dataset.root=data/FunnyBirdsSpurious.
+name: funnybirds_human
+dataset: {name: funnybirds, root: data/FunnyBirds}
+backbone: {name: clip, model: ViT-B-16, pretrained: openai}
+stages:
+  discovery: {name: dataset}
+  filtering: [{name: rules, remove_class_names: false}]
+  generation: {name: scores}
+  alignment: {name: human}
+  predictor: {name: dense}
+  training: {name: sequential}
+evaluation:
+  - {name: shift}
+  - {name: leakage}
+  - {name: localization}
+  - {name: keypoint_distance}
+  - {name: part_iou}
+paths: {cache: .cache, runs: runs/funnybirds, results: results/funnybirds.jsonl}
