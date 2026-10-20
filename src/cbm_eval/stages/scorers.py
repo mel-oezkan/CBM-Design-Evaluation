@@ -12,7 +12,7 @@ import torch
 
 from ..registry import Registry
 from ..structures import ConceptSet
-from ..utils import stable_hash
+from ..utils import rng_preserved, stable_hash
 from .common import match_names
 
 if TYPE_CHECKING:
@@ -56,6 +56,14 @@ class GroundingDINOScorer:
         path = ctx.cache_dir / "scores" / f"gdino-{split}-{stable_hash(key)}.pt"
         if path.exists():
             return torch.load(path)
+        with rng_preserved():  # loading and running the detector must not shift the run's random draws
+            out = self._detect(concepts, ctx, split)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(out, path)
+        return out
+
+    def _detect(self, concepts: ConceptSet, ctx: "Context", split: str) -> torch.Tensor:
+        """(N, K) highest box score of each concept in each image of ``split``."""
         from PIL import Image
 
         from ..grounding import GroundingDINODetector
@@ -77,6 +85,4 @@ class GroundingDINOScorer:
                         if d.label >= 0:
                             k = chunk[d.label]
                             out[start + b, k] = max(out[start + b, k].item(), d.score)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        torch.save(out, path)
         return out

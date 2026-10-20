@@ -45,6 +45,9 @@ into one feature vector, and the result is saved under `.cache/features/`:
 | val | 400 | `(400, 128)` |
 | test | 800 | `(800, 128)` |
 
+Encoding the images draws no random numbers from the run: a run on an empty cache gives exactly
+the result of a run that reads the cache.
+
 From here on, **no stage looks at pixels.** Training a CBM is training two small layers on top of
 these cached tensors, which is why a run takes seconds and a sweep of hundreds of runs is cheap.
 A sweep also keeps the dataset, backbone and loaded features in memory across consecutive configs

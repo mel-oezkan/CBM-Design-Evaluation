@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 from torch.utils.data import Dataset as TorchDataset
 
 from ..structures import FeatureSplit
-from ..utils import stable_hash
+from ..utils import rng_preserved, stable_hash
 from .base import ImageDataset
 
 log = logging.getLogger(__name__)
@@ -23,7 +23,15 @@ def load_features(dataset: ImageDataset, backbone, split: str, cache_dir: str | 
     path = Path(cache_dir) / "features" / dataset.name / f"{split}-{stable_hash(key)}.pt"
     if path.exists():
         return FeatureSplit(**torch.load(path, weights_only=False))
+    with rng_preserved():  # a cold cache must not shift the run's random draws (see ``rng_preserved``)
+        data = _extract(dataset, backbone, split, patches, batch_size, num_workers)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(data, path)
+    return FeatureSplit(**data)
 
+
+def _extract(dataset: ImageDataset, backbone, split: str, patches: bool, batch_size: int,
+             num_workers: int) -> dict:
     grid = backbone.patch_grid if patches else None
     loader = DataLoader(dataset.torch_split(split, backbone.transform(), grid),
                         batch_size=batch_size, num_workers=num_workers, shuffle=False)
@@ -51,9 +59,7 @@ def load_features(dataset: ImageDataset, backbone, split: str, cache_dir: str | 
         part_masks=torch.cat(parts) if parts else None,
         paths=[s.image if isinstance(s.image, str) else None for s in dataset.samples(split)],
     )
-    path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(data, path)
-    return FeatureSplit(**data)
+    return data
 
 
 def load_aux_features(dataset: ImageDataset, backbone, split: str, cache_dir: str | Path,
@@ -64,11 +70,12 @@ def load_aux_features(dataset: ImageDataset, backbone, split: str, cache_dir: st
     path = Path(cache_dir) / "features" / dataset.name / f"{split}-aux-{stable_hash(key)}.pt"
     if path.exists():
         return torch.load(path)
-    # its own generator: a DataLoader draws a base seed even unshuffled, and this runs inside ``fit``,
-    # so a cold cache would otherwise shift the run's later random draws
-    loader = DataLoader(dataset.torch_split(split, backbone.transform()), batch_size=batch_size,
-                        num_workers=num_workers, shuffle=False, generator=torch.Generator())
-    out = torch.cat([backbone.encode_aux(batch["image"]).float().cpu() for batch in loader])
+    # its own generator: a DataLoader draws a base seed even unshuffled; ``rng_preserved`` also covers a
+    # backbone that builds its network on first use
+    with rng_preserved():
+        loader = DataLoader(dataset.torch_split(split, backbone.transform()), batch_size=batch_size,
+                            num_workers=num_workers, shuffle=False, generator=torch.Generator())
+        out = torch.cat([backbone.encode_aux(batch["image"]).float().cpu() for batch in loader])
     path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(out, path)
     return out
@@ -116,14 +123,15 @@ def load_augmented_features(dataset: ImageDataset, backbone, split: str, cache_d
     if path.exists():
         return torch.load(path)
     images = _SeededViews(dataset.torch_split(split, backbone.train_transform()), views, seed)
-    # its own generator: a DataLoader draws a base seed even unshuffled, which would shift the global RNG
-    loader = DataLoader(images, batch_size=batch_size, num_workers=num_workers, shuffle=False,
-                        generator=torch.Generator())
     feats = []
-    for b, batch in enumerate(loader):
-        feats.append(backbone.encode_images(batch["image"]).half().cpu())
-        if b % 100 == 0:
-            log.info("augmented %s features of %s: %d / %d", split, dataset.name, b * batch_size, len(images))
+    with rng_preserved():  # also covers a backbone that builds its network on first use
+        # its own generator: a DataLoader draws a base seed even unshuffled, which would shift the global RNG
+        loader = DataLoader(images, batch_size=batch_size, num_workers=num_workers, shuffle=False,
+                            generator=torch.Generator())
+        for b, batch in enumerate(loader):
+            feats.append(backbone.encode_images(batch["image"]).half().cpu())
+            if b % 100 == 0:
+                log.info("augmented %s features of %s: %d / %d", split, dataset.name, b * batch_size, len(images))
     out = torch.cat(feats).view(views, images.n, -1).transpose(0, 1).contiguous()
     if not torch.isfinite(out).all():
         raise ValueError(f"Augmented features of '{backbone.cache_key()['name']}' overflow float16 storage; "

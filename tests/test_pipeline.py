@@ -123,7 +123,6 @@ def test_sweep_shares_a_context_without_changing_results(base_cfg, monkeypatch):
     cheap = base_cfg.with_overrides({"evaluation": [{"name": "shift"}, {"name": "leakage", "repeats": 2}]})
     configs = [cheap, cheap.with_overrides({"stages.predictor": {"name": "dense"}}), cheap.with_overrides({"seed": 1}),
                cheap.with_overrides({"stages.training": {"name": "joint", "epochs": 10}})]
-    run(cheap, save=False)  # a cold feature cache draws from the global RNG; warm it for both sides
     alone = [run(cfg, save=False).metrics for cfg in configs]
     built = _count_contexts(monkeypatch)
     status = sweep(configs, ResultsStore(base_cfg.paths["results"]), save=False)

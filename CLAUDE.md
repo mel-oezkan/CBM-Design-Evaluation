@@ -108,7 +108,8 @@ Kind-specific contracts:
   `cache_key()` must include every constructor arg that changes the data.
 - **Backbone**: frozen; set `dim` (and `patch_grid`, `has_text` where applicable).
   `cache_key()` must identify the weights exactly. Patch and text embeddings must live in the
-  same space as `encode_images`. Import optional heavy deps (`open_clip`, `transformers`) inside
+  same space as `encode_images`. A network built lazily (on first use) is built under
+  `rng_preserved()`. Import optional heavy deps (`open_clip`, `transformers`) inside
   methods, not at module top level.
 - **Generation**: subclass `ConceptLayer`, implement `represent` and set `rep_dim`; concept
   predictions stay in target space so interventions keep working. Set `represent_uses_x = False`
@@ -152,6 +153,10 @@ Kind-specific contracts:
   Never cache a partial or failed result: `ClaudeClient` raises on refused or cut-off responses
   instead of storing them, which is also why `max_tokens` can stay out of its key.
 - Randomness flows from `cfg.seed` (`seed_everything`); don't create unseeded generators.
+- A cache miss must not advance the global RNG: compute it under `utils.rng_preserved()` (as
+  `load_features`, the instance sources and `GroundingDINOScorer` do), so the first run of a config
+  on a cold cache equals every later run. The same holds for a network a backbone builds on first use
+  (`InceptionBackbone.frozen`) and for side work such as W&B tracking.
 - Training defaults to CPU; devices come from `utils.resolve_device` and the config, not hard-coded `.cuda()`.
 
 ## Where things do NOT go

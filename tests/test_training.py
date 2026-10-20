@@ -60,8 +60,6 @@ def _train(cfg, per_step: bool) -> dict[str, torch.Tensor]:
         builder.training = PER_STEP[type(builder.training)](**spec)
     ctx = builder.context()
     concepts = builder.concepts(ctx)
-    for split in ("train", "val"):
-        ctx.inputs(split)  # extracting features on a cold cache draws from the global RNG
     seed_everything(cfg.seed)
     return builder.train(ctx, concepts).model.state_dict()
 

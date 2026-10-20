@@ -10,16 +10,12 @@ from __future__ import annotations
 
 import json
 import math
-import random
-from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable, Iterator
-
-import numpy as np
-import torch
+from typing import Any, Callable
 
 from .config import ExperimentConfig
 from .results import factors
+from .utils import rng_preserved
 
 
 class History:
@@ -44,19 +40,6 @@ class History:
         Path(path).write_text("".join(json.dumps(r, allow_nan=True) + "\n" for r in self.rows))
 
 
-@contextmanager
-def _global_rng_kept() -> Iterator[None]:
-    """Restore the generators ``seed_everything`` seeds: W&B may draw from them (e.g. for run ids),
-    which would shift every later draw of the run."""
-    states = random.getstate(), np.random.get_state(), torch.get_rng_state()
-    try:
-        yield
-    finally:
-        random.setstate(states[0])
-        np.random.set_state(states[1])
-        torch.set_rng_state(states[2])
-
-
 class WandbTracker:
     """Streams a run's ``History`` to W&B: one W&B run per ``(config, seed)``, named
     ``<name>-<run_id>-s<seed>`` in ``group`` (default: the config's name), with the run id, seed and
@@ -78,7 +61,7 @@ class WandbTracker:
 
             self.client = wandb
         self._phases = set()
-        with _global_rng_kept():
+        with rng_preserved():
             self.run = self.client.init(project=self.project, entity=self.entity, group=self.group or cfg.name,
                                         name=f"{cfg.name}-{cfg.run_id}-s{cfg.seed}", mode=self.mode,
                                         config={"run_id": cfg.run_id, "seed": cfg.seed, **factors(cfg)},
@@ -86,7 +69,7 @@ class WandbTracker:
 
     def log(self, row: dict[str, Any]) -> None:
         phase = row["phase"]
-        with _global_rng_kept():
+        with rng_preserved():
             if phase not in self._phases:
                 self._phases.add(phase)
                 self.run.define_metric(f"{phase}/epoch")
@@ -97,7 +80,7 @@ class WandbTracker:
         """Close the W&B run: with the run's ``metrics`` as summary, or (None) as failed."""
         if self.run is None:
             return
-        with _global_rng_kept():
+        with rng_preserved():
             if metrics is not None:
                 summary = metrics | {f"train/{k}": v for k, v in (train_log or {}).items()}
                 self.run.summary.update({k: v for k, v in summary.items()

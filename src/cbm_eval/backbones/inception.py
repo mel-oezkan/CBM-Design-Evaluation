@@ -22,6 +22,7 @@ from torch import nn
 from torchvision import transforms as T
 
 from ..registry import BACKBONES
+from ..utils import rng_preserved
 from .base import Backbone
 
 _IMAGENET = ((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
@@ -117,8 +118,11 @@ class InceptionBackbone(Backbone):
         if self._encoder is None:
             import torchvision
 
-            net = torchvision.models.inception_v3(weights=self.kw["weights"], aux_logits=True,
-                                                  init_weights=self.kw["weights"] is None)
+            # built on first use, which may be inside a run: its layers initialize from the global RNG
+            # before the weights load over them, which must not shift the run's random draws
+            with rng_preserved():
+                net = torchvision.models.inception_v3(weights=self.kw["weights"], aux_logits=True,
+                                                      init_weights=self.kw["weights"] is None)
             self._encoder = InceptionEncoder(net, aux=True).eval().requires_grad_(False).to(self.device)
         return self._encoder
 

@@ -78,7 +78,6 @@ def test_finetuned_history_records_the_encoder_lr(base_cfg):
 
 def test_tracking_streams_the_history_and_changes_nothing(base_cfg):
     cfg = _cfg(base_cfg, {"name": "joint_weighted", "epochs": 4})
-    run(cfg, save=False)  # warm the feature cache: extraction draws random numbers
     plain = run(cfg, save=False)
     client = StubWandb()
     tracked = run(cfg, save=False, tracker=WandbTracker("proj", client=client))

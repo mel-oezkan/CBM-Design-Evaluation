@@ -7,7 +7,7 @@ import mimetypes
 from pathlib import Path
 from typing import Any
 
-from ..utils import JsonCache
+from ..utils import JsonCache, rng_preserved
 
 DEFAULT_MODEL = "claude-opus-5-5"
 
@@ -48,15 +48,16 @@ class ClaudeClient:
         content.append({"type": "text", "text": prompt})
 
         kwargs = {"system": system} if system else {}
-        response = self.client.beta.messages.create(
-            model=self.model,
-            max_tokens=self.max_tokens,
-            output_config={"effort": self.effort},
-            betas=["server-side-fallback-2026-07-01"],
-            fallbacks="default",
-            messages=[{"role": "user", "content": content}],
-            **kwargs,
-        )
+        with rng_preserved():  # the client's retry jitter must not shift the run's random draws
+            response = self.client.beta.messages.create(
+                model=self.model,
+                max_tokens=self.max_tokens,
+                output_config={"effort": self.effort},
+                betas=["server-side-fallback-2026-07-01"],
+                fallbacks="default",
+                messages=[{"role": "user", "content": content}],
+                **kwargs,
+            )
         if response.stop_reason == "refusal":
             raise RuntimeError(f"Concept discovery request was refused: {response.stop_details}")
         if response.stop_reason == "max_tokens":

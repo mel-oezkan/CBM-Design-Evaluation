@@ -26,7 +26,7 @@ from PIL import Image
 
 from ..registry import INSTANCES
 from ..structures import InstanceSplit
-from ..utils import stable_hash
+from ..utils import rng_preserved, stable_hash
 from .base import InstanceSource, _concepts
 
 log = logging.getLogger(__name__)
@@ -160,15 +160,16 @@ class SegmentSource(InstanceSource):
         path = ctx.cache_dir / "segments" / dataset.name / f"{part}-{stable_hash(key)}.pt"
         if path.exists():
             return torch.load(path, weights_only=False)
-        self.prepare(ctx, split)
         records: list[list[dict[str, Any]]] = []
-        for start in range(0, len(paths), self.batch_size):
-            images = [Image.open(p).convert("RGB") for p in paths[start : start + self.batch_size]]
-            proposals = self.propose(images, list(range(start, start + len(images))), ctx)
-            for image, segs in zip(images, proposals):
-                records.append([pack(s, image.size) for s in self.postprocess(segs, image.size)])
-            if (start // self.batch_size) % 50 == 0:
-                log.info("%s %s: segmented %d/%d images", self.name, split, len(records), len(paths))
+        with rng_preserved():  # loading and running the segmenter must not shift the run's random draws
+            self.prepare(ctx, split)
+            for start in range(0, len(paths), self.batch_size):
+                images = [Image.open(p).convert("RGB") for p in paths[start : start + self.batch_size]]
+                proposals = self.propose(images, list(range(start, start + len(images))), ctx)
+                for image, segs in zip(images, proposals):
+                    records.append([pack(s, image.size) for s in self.postprocess(segs, image.size)])
+                if (start // self.batch_size) % 50 == 0:
+                    log.info("%s %s: segmented %d/%d images", self.name, split, len(records), len(paths))
         path.parent.mkdir(parents=True, exist_ok=True)
         torch.save(records, path)
         return records

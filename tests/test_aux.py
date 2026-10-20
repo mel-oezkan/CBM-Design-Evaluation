@@ -118,7 +118,6 @@ def test_normalize_loss_divides_the_aux_terms_too(base_cfg):
     """Koh et al. divide the whole loss, auxiliary terms included, by ``1 + concept_weight``: under SGD
     without momentum or decay that equals dividing ``lr``."""
     sgd = {"name": "joint_weighted", "epochs": 3, "aux": AUX, "concept_weight": 1.5, "optimizer": "sgd"}
-    run(_cfg(base_cfg, {**sgd, "epochs": 1}), save=False)  # warm both feature caches: extraction draws random numbers
     normalized = run(_cfg(base_cfg, {**sgd, "lr": 0.01, "normalize_loss": True}), save=False)
     scaled = run(_cfg(base_cfg, {**sgd, "lr": 0.01 / 2.5}), save=False)
     assert torch.allclose(_head_weight(normalized), _head_weight(scaled), atol=1e-6)

@@ -42,8 +42,6 @@ def _state(cfg):
     builder = PipelineBuilder(cfg)
     ctx = builder.context()
     concepts = builder.concepts(ctx)
-    for split in ("train", "val"):
-        ctx.inputs(split)
     seed_everything(cfg.seed)
     cbm = builder.train(ctx, concepts)
     return cbm, ctx
