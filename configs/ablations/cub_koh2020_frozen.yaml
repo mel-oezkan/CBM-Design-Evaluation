@@ -8,6 +8,7 @@ factors:
   backbone.eval_resize: [true]                         # eval images resized to 299 x 299, not center-cropped
   stages.training.augment: [null]                      # no augmentation: clean cached features
   stages.generation: [{name: scores, dropout: 0.5, standardize: false, init_std: 0.1}]  # probabilities into the head
+  stages.generation.raw: [false]                       # logits clamped at +-13.8 before the head (issue #47)
   stages.generation.dropout: [0.0]                     # no dropout before the concept layer
   stages.generation.standardize: [true]                # z-scored features
   stages.training.train_on_val: [false]                # train only (still selected by training accuracy)

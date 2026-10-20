@@ -4,7 +4,7 @@
 #   - no auxiliary head: in their joint model the auxiliary concept logits also pass through the
 #     shared c -> y layer (0.4 x its loss), which would train that layer even with a frozen backbone.
 # As in their code: one SGD optimizer (lr 0.001, momentum 0.9, weight decay 4e-4, batch 64) for the
-# concept layer and the linear head on the concept logits; loss = (CE + lambda * sum_k w_k BCE_k) /
+# concept layer and the linear head on the unclamped concept logits (`raw: true`, issue #47); loss = (CE + lambda * sum_k w_k BCE_k) /
 # (1 + lambda * 112), i.e. concept_weight = 0.01 * 112 with our concept-averaged BCE and
 # normalize_loss; trained on train + val for up to 1000 epochs, keeping the epoch with the best running
 # training task accuracy (patience 100).
@@ -14,7 +14,7 @@ backbone: {name: inception, mean: [0.5, 0.5, 0.5], std: [2, 2, 2], eval_resize: 
 stages:
   discovery: {name: dataset}
   filtering: [{name: rules, remove_class_names: false, max_words: 10}]
-  generation: {name: logits, dropout: 0.5, standardize: false, init_std: 0.1}
+  generation: {name: logits, raw: true, dropout: 0.5, standardize: false, init_std: 0.1}
   alignment: {name: human}
   predictor: {name: dense}
   training:

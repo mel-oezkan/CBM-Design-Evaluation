@@ -1,7 +1,7 @@
 # Koh et al. 2020, CUB, SEQUENTIAL bottleneck on a FROZEN Inception-v3 (paper, fine-tuned: Table 1 0.243
 # task error, Table 2 0.034 concept error). Data and x -> c exactly as cub_koh2020_frozen_independent.yaml,
 # so both arms share their x -> c model; gaps as listed there.
-#   c -> y linear on the predicted concept logits; SGD lr 0.001, momentum 0.9, weight decay 4e-5, batch
+#   c -> y linear on the predicted, unclamped concept logits (`raw: true`, issue #47); SGD lr 0.001, momentum 0.9, weight decay 4e-5, batch
 #          64, up to 1000 epochs, best validation accuracy (patience 100). Like their ExtractConcepts
 #          step, the head trains and is selected on predictions for an augmented view of each train
 #          and val image (`head_on_augmented`); test predictions use the center crop.
@@ -11,7 +11,7 @@ backbone: {name: inception, mean: [0.5, 0.5, 0.5], std: [2, 2, 2], eval_resize: 
 stages:
   discovery: {name: dataset}
   filtering: [{name: rules, remove_class_names: false, max_words: 10}]
-  generation: {name: logits, dropout: 0.5, standardize: false, init_std: 0.1}
+  generation: {name: logits, raw: true, dropout: 0.5, standardize: false, init_std: 0.1}
   alignment: {name: human}
   predictor: {name: dense}
   training:

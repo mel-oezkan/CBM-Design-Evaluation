@@ -63,8 +63,8 @@ commands in `CUB/README.md`, plus `CUB/train.py`, `CUB/dataset.py` and `CUB/temp
 | x → c: SGD lr 0.01, momentum 0.9, weight decay 4e-5, batch 64, `drop_last` | `optimizer: sgd, momentum: 0.9, concept_lr: 0.01, concept_weight_decay: 0.00004, batch_size: 64, drop_last: true` |
 | x → c with `-ckpt 1`: train + val, best running training accuracy, ≤ 1000 epochs, stop after 100 without improvement | `concept_train_on_val: true, concept_select: train_acc, concept_epochs: 1000, patience: 100` |
 | Independent c → y: trained on true concepts, tested on `sigmoid`; SGD lr 0.001, wd 5e-5, ≤ 500 epochs, best val accuracy | `generation: scores`, `lr: 0.001, weight_decay: 0.00005, epochs: 500, select: val_acc` |
-| Sequential c → y: on predicted logits under the train-time transform (`ExtractConcepts`); SGD lr 0.001, wd 4e-5, ≤ 1000 epochs | `generation: logits`, `head_on_augmented: true`, `weight_decay: 0.00004, epochs: 1000, select: val_acc` |
-| Joint: one SGD (lr 0.001, wd 4e-4), loss `(CE + λ Σ_k w_k BCE_k) / (1 + λK)`, train + val, best training accuracy | `joint_weighted, concept_weight: 1.12, normalize_loss: true, train_on_val: true, select: train_acc` |
+| Sequential c → y: on predicted logits under the train-time transform (`ExtractConcepts`); SGD lr 0.001, wd 4e-5, ≤ 1000 epochs | `generation: {name: logits, raw: true}`, `head_on_augmented: true`, `weight_decay: 0.00004, epochs: 1000, select: val_acc` |
+| Joint: one SGD (lr 0.001, wd 4e-4), loss `(CE + λ Σ_k w_k BCE_k) / (1 + λK)`, train + val, best training accuracy | `generation: {name: logits, raw: true}`, `joint_weighted, concept_weight: 1.12, normalize_loss: true, train_on_val: true, select: train_acc` |
 | `-use_aux`: + 0.4 × every loss term on `AuxLogits`; in joint, its concepts also go through f | `training.aux: {weight: 0.4, init_std: 0.001}` (fine-tuned anchors only; it refuses `augment:`) |
 | Linear c → y (`MLP` with `expand_dim=0`), default init | `predictor: dense` |
 | Task error / concept error (`inference.py`) | `1 - shift.test.acc` / `concepts.test.concept_error` |
@@ -85,10 +85,6 @@ commands in `CUB/README.md`, plus `CUB/train.py`, `CUB/dataset.py` and `CUB/temp
 - **Interventions:** the `leakage` evaluator replaces random single concepts, not the paper's
   visibility-aware concept groups. With `generation: logits`, an intervened 0/1 value becomes a
   saturated logit (±13.8) rather than the 5th/95th-percentile logits the paper uses.
-- **Logit clamp** ([#47](https://github.com/mel-oezkan/CBM-Design-Evaluation/issues/47)): the
-  sequential and joint anchors use `generation: logits`, which clamps the concept logits at ±13.8
-  before the head. Beyond ±13.8 the task loss has no gradient. The authors pass the raw logits;
-  `generation: {raw: true}` does that.
 
 ### Remaining differences: fine-tuned arm
 
@@ -163,6 +159,7 @@ Each ablation undoes one detail of the authors' code; the alternative is the pip
 | `stages.generation.init_std` | `null`: PyTorch's default init |
 | `stages.training.(concept_)train_on_val` | `false`: train split only, still selected by training accuracy |
 | `stages.generation` | `scores`: probabilities instead of logits into the head (sequential, joint) |
+| `stages.generation.raw` | `false`: logits clamped at ±13.8 before the head ([#47](https://github.com/mel-oezkan/CBM-Design-Evaluation/issues/47)) (sequential, joint) |
 | `stages.training.head_on_augmented` | `false`: sequential head on clean predictions |
 | `stages.training.normalize_loss` | `false`: joint loss not divided by `1 + λK` |
 | `stages.training.name` | the unweighted training variant |
