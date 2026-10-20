@@ -3,12 +3,13 @@
 Everything the CLI does is a Python call. This page trains a CBM from a notebook or script,
 predicts with it, intervenes on its concepts, reads its head, compares two configs and runs one
 stage on its own. All code on this page comes from two scripts in `examples/`. The test suite runs
-them offline on the synthetic dataset, so the code here works with the current version.
+them offline on the synthetic dataset, so the code here works with the current version. The
+printed outputs come from the version this page was written for; your numbers can differ.
 
 | You want to | Call | You get |
 |---|---|---|
 | describe a run | [`ExperimentConfig.from_dict(d)`][cbm_eval.config.ExperimentConfig] | the config; `cfg.run_id` is its hash |
-| train and evaluate it | [`pipeline.run(cfg, store)`][cbm_eval.pipeline.run] | a [`RunResult`][cbm_eval.pipeline.RunResult]: `cbm`, `metrics`, `ctx`, `run_dir`, `concept_trace` |
+| train and evaluate it | [`pipeline.run(cfg, store)`][cbm_eval.pipeline.run] | a [`RunResult`][cbm_eval.pipeline.RunResult]: `cfg`, `cbm`, `metrics`, `ctx`, `run_dir`, `concept_trace` |
 | read a split | [`ctx.inputs(split)`][cbm_eval.context.Context.inputs], [`ctx.split(split)`][cbm_eval.context.Context.split] | the CBM's input features; labels and annotations |
 | predict, intervene | [`cbm.predict(x, intervene, bag)`][cbm_eval.model.TrainedCBM.predict] | `(class logits, concept predictions)` |
 | analyze many runs | [`ResultsStore(path).load()`][cbm_eval.results.ResultsStore.load], [`analysis`][cbm_eval.analysis] | a flat DataFrame; tables of means and effects |
@@ -31,8 +32,9 @@ head on top.
 --8<-- "examples/quickstart.py:config"
 ```
 
-`from_dict` checks that every stage is present. Unknown kwargs fail later, when
-`PipelineBuilder` calls each component's constructor. To change one key of an existing config,
+`from_dict` checks the top-level keys and the stage names. A component's kwargs fail when that
+component is built: stage and evaluator kwargs in `PipelineBuilder(cfg)`, dataset and backbone
+kwargs in `PipelineBuilder.context()`. To change one key of an existing config,
 use `cfg.with_overrides({"stages.predictor.lam": 0.01})`; it returns a new config with a new
 `run_id`.
 
@@ -51,6 +53,7 @@ The [`RunResult`][cbm_eval.pipeline.RunResult] holds:
 
 | Field | What it is |
 |---|---|
+| `cfg` | the config that ran |
 | `cbm` | the [`TrainedCBM`][cbm_eval.model.TrainedCBM]: concept layer, head, the concepts it uses (`cbm.concepts`), and its targets (`cbm.aligned`) |
 | `metrics` | the flat metric dict, keys prefixed by evaluator (`shift.test.acc`) |
 | `ctx` | the run's [`Context`][cbm_eval.context.Context]: dataset, backbone and cached features |
@@ -89,8 +92,8 @@ intervene on 8 concepts: accuracy 0.923
 
 `cbm.aligned.targets(split)` holds the values the concept layer was trained to predict. With
 `alignment: human` they are the dataset's annotations. With other alignments they are pseudo-labels
-(for example CLIP similarities), not ground truth. The [`leakage`](components.md#evaluation)
-evaluator runs random interventions of this kind for every run.
+(for example CLIP similarities), not ground truth. With `leakage` in `evaluation:`, the [`leakage`](components.md#evaluation)
+evaluator runs random interventions of this kind whenever ground-truth concepts are available.
 
 ## Read the head
 
@@ -130,7 +133,8 @@ sparse(lam=0.001)                      0.7925                                0.1
 
 For many configs, build them with [`load_ablation(path).expand()`][cbm_eval.config.Ablation.expand]
 and pass the list to [`pipeline.sweep`][cbm_eval.pipeline.sweep]. A sweep skips rows already in the
-store and shares one `Context` between configs with the same data and backbone.
+store. Consecutive configs with equal
+[`PipelineBuilder.context_key()`][cbm_eval.pipeline.PipelineBuilder.context_key] share one `Context`.
 [`analysis.effects`][cbm_eval.analysis.effects] fits the effects model that
 [Getting started](getting-started.md#analyze-the-results) shows.
 
@@ -153,10 +157,13 @@ The rule filter removes the duplicate `Concept 03`, the class name `class_2` and
 many words. Stages return new objects and never change their inputs.
 
 !!! note "A Context needs a full config"
-    `PipelineBuilder(cfg).context()` needs a config with all six stages, although the `Context`
-    only reads the dataset, backbone, device and cache path.
+    `PipelineBuilder(cfg).context()` needs a config with all six stages. The `Context` itself uses
+    only the data-related keys (dataset, backbone, `teacher`, `eval_datasets`, `instances`), the
+    device, the cache path and the seed; [`context_key()`][cbm_eval.pipeline.PipelineBuilder.context_key]
+    lists them. The evaluators also count: one with `needs_patches` (such as `localization`, which
+    the synthetic anchor lists) makes the `Context` load patch features.
     [#64](https://github.com/mel-oezkan/CBM-Design-Evaluation/issues/64) proposes a way to build
-    one from those alone.
+    a `Context` without the stages.
 
 `PipelineBuilder` also exposes the steps of `run` one by one. Use them to inspect the concepts
 before training, or to train several heads on one concept set:

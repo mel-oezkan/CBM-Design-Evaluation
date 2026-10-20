@@ -21,7 +21,7 @@ REPO = Path(__file__).resolve().parents[1]
 
 # --8<-- [start:stage]
 # A stage reads data through a Context. PipelineBuilder builds one from a config; the synthetic
-# anchor is enough here, and only its dataset, backbone, device and paths matter.
+# anchor is enough here. Its stages are not used, but its data keys, device, paths and seed are.
 cfg = load_config(REPO / "configs/anchors/synthetic.yaml", {"device": "cpu"})
 ctx = PipelineBuilder(cfg).context()
 
