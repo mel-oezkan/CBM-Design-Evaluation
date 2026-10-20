@@ -217,8 +217,11 @@ features, and the encoder is saved to `runs/<run>/encoder.pt`.
 
 Only backbones that support it (`inception`, `toy`) can be fine-tuned. It can't be combined with
 `instances:` or with evaluators that read patch features (`localization`, `keypoint_distance`,
-`part_iou`). See `configs/anchors/cub_koh2020.yaml` for a full example. Fine-tuning selects on the
-validation split, so `train_on_val` / `concept_train_on_val` are not available with it.
+`part_iou`). See `configs/anchors/cub_koh2020.yaml` for a full example. With `train_on_val`
+(`joint`) or `concept_train_on_val` (step 1 of `independent` / `sequential`), the fine-tuned phase
+also trains on the validation images, augmented like the training images, and selects by training
+accuracy as on a frozen backbone. It can't be combined with `augment:`, because it augments the
+images itself.
 
 ## Auxiliary concept head
 
@@ -233,7 +236,8 @@ on its concept logits is added, multiplied by `weight`. It is the same loss as t
 
 Validation and model selection use the main branch only. The auxiliary layer is discarded after
 training, so evaluation never sees it. Its weights start from a normal distribution truncated at
-±2 `init_std` (`null`: PyTorch's default init).
+±2 `init_std` (`null`: PyTorch's default init). It reads the tap's features z-scored with training
+statistics, or raw with `standardize: false` (as Koh et al.).
 
 What it changes depends on the backbone:
 

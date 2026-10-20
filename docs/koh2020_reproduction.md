@@ -10,7 +10,7 @@ There are two arms:
 - **Frozen backbone** (`cub_koh2020_frozen*.yaml`): everything as in the authors' code except that
   Inception-v3 is not fine-tuned. Features are extracted once, so only that step needs a GPU.
 - **Fine-tuned backbone** (`cub_koh2020*.yaml`): Inception-v3 trained end to end, as in the paper.
-  It needs GPU-days and has not been run yet.
+  It needs one GPU per run and has no results on the current anchors yet.
 
 !!! info "Status"
     The data path is verified against the authors' processed data (same 112 concepts, identical
@@ -88,19 +88,22 @@ commands in `CUB/README.md`, plus `CUB/train.py`, `CUB/dataset.py` and `CUB/temp
 
 ### Remaining differences: fine-tuned arm
 
-The fine-tuned sequential and joint anchors pass the raw concept logits to the head
-(`generation: {name: logits, raw: true}`, [#47](https://github.com/mel-oezkan/CBM-Design-Evaluation/issues/47)).
-They also use the frozen arm's SGD settings for the concept layer and head (`optimizer: sgd`,
-`concept_lr`, `normalize_loss`, as in the table above). Runs made before that used the clamped
-logits and Adam, and keep their old run ids. Otherwise the fine-tuned anchors do not use the frozen
-arm's options yet
-([issue #11](https://github.com/mel-oezkan/CBM-Design-Evaluation/issues/11)):
+The fine-tuned anchors use the frozen arm's recipe (the table above), with three changes that
+fine-tuning needs:
 
-- **Model selection:** early stopping on the validation loss, versus up to 1000 epochs retrained
-  on train+val and selected by training accuracy. `train_on_val` does not support `finetune:` yet.
-- **Inputs:** ImageNet normalization instead of mean 0.5 / std 2; evaluation images are resized
-  to 299 rather than center-cropped. The auxiliary concept head reads standardized features; the
-  paper's reads them raw.
+- **Dropout:** the encoder applies Inception-v3's own dropout (p = 0.5) while it trains, so
+  `generation.dropout` stays 0.
+- **Augmentation:** a fresh random transform every epoch, not cached views. So `augment:` is not
+  set, and the sequential head can't use `head_on_augmented`: it trains and is selected on
+  concept predictions for the center-cropped train and val images, while the authors' code uses one
+  augmented view of each.
+- **Auxiliary head:** `aux: {weight: 0.4, init_std: 0.001, standardize: false}` on the raw tap
+  features, as in their code.
+
+Interventions differ as in the frozen arm. Runs made before
+[issue #11](https://github.com/mel-oezkan/CBM-Design-Evaluation/issues/11) was fixed used early
+stopping on the validation loss, ImageNet inputs and resized evaluation images. They keep their old
+run ids.
 
 ## Data
 

@@ -114,6 +114,16 @@ def test_frozen_joint_aux_trains_on_train_and_val(base_cfg):
     assert not torch.allclose(_head_weight(res), _head_weight(only_train))
 
 
+def test_finetuned_aux_trains_on_train_and_val_and_reads_raw_features(base_cfg):  # issue #11
+    training = {"name": "joint_weighted", "epochs": 2, "finetune": FT, "aux": AUX, "train_on_val": True,
+                "select": "train_acc"}
+    res = run(_cfg(base_cfg, training), save=False)
+    assert all(not math.isnan(v) for v in res.metrics.values()), res.metrics
+    raw = run(_cfg(base_cfg, {**training, "aux": {**AUX, "standardize": False}}), save=False)
+    assert not torch.allclose(_head_weight(res), _head_weight(raw))
+    assert res.cfg.run_id != raw.cfg.run_id
+
+
 def test_normalize_loss_divides_the_aux_terms_too(base_cfg):
     """Koh et al. divide the whole loss, auxiliary terms included, by ``1 + concept_weight``: under SGD
     without momentum or decay that equals dividing ``lr``."""

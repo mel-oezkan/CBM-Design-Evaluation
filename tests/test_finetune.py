@@ -73,3 +73,38 @@ def test_finetune_refuses_patch_readers_and_bags(base_cfg):
 def test_unknown_finetune_keys_are_rejected(base_cfg):
     with pytest.raises(TypeError):
         PipelineBuilder(_cfg(base_cfg, {"name": "joint", "finetune": {"lrr": 0.1}}))
+
+
+ON_VAL = {"joint": {"select": "train_acc", "train_on_val": True},
+          "sequential": {"concept_select": "train_acc", "concept_train_on_val": True},
+          "independent_weighted": {"concept_select": "train_acc", "concept_train_on_val": True, "select": "val_acc"}}
+
+
+@pytest.mark.parametrize("name", ON_VAL)
+def test_finetune_trains_on_train_and_val(base_cfg, name):  # issue #11
+    res = run(_cfg(base_cfg, {"name": name, "epochs": 5, "finetune": FT, **ON_VAL[name]}), save=False)
+    m, log = res.metrics, res.cbm.train_log
+    assert m["shift.test.acc"] > 0.4 and 0 <= m["concepts.test.concept_error"] < 0.5
+    phase = "joint" if name == "joint" else "concept"
+    assert 0 < log[f"{phase}_train_acc"] <= 1 and math.isnan(log[f"{phase}_val_loss"])  # NaN: no val split left
+    if name != "joint":  # the head still validates, as it does on a frozen backbone
+        assert not math.isnan(log["head_val_loss"])
+
+
+def test_the_on_val_feed_serves_every_train_and_val_image_once(base_cfg):
+    from cbm_eval.stages.training import _ImageFeed
+
+    builder = PipelineBuilder(_cfg(base_cfg, {"name": "joint", "finetune": FT}))
+    ctx = builder.context()
+    aligned = builder.alignment.fit(builder.concepts(ctx), ctx)
+    spec = builder.training.finetune.__class__(**{**FT, "batch_size": 1, "augment": False})
+    feed = _ImageFeed(ctx, aligned, ctx.backbone.encoder(), spec, torch.device("cpu"), 0, on_val=True)
+    with torch.no_grad():
+        served = list(feed.batches("train"))
+        expected = [feed.encode(s) for s in ("train", "val")]
+
+    def rows(batches):  # (x, y, t) per image, as a sorted list: the order of the shuffled batches is irrelevant
+        x, y, t = (torch.cat([getattr(b, k) for b in batches]) for k in ("x", "y", "t"))
+        return sorted(map(tuple, torch.cat([x, y[:, None].float(), t], 1).round(decimals=4).tolist()))
+
+    assert rows(served) == rows(expected)
