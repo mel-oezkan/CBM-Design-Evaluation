@@ -70,6 +70,8 @@ uv run --group docs properdocs serve     # http://127.0.0.1:8000
   of adding a paper ([SEG-MIL-CBM](docs/instance-bags.md), [Koh et al. 2020](docs/koh2020_reproduction.md))
 - [Config reference](docs/configs.md): the config format, `run_id`, test-only domains
 - [Data](docs/data.md), [Metrics](docs/metrics.md) and [Part localization](docs/part-localization.md)
+- [Planned models](docs/models.md): published CBMs to support next, mapped onto the stages
+- [Planned: data-quality study](docs/data-study.md): how much the training data shapes a CBM, and an annotation platform for relabelling (not built yet)
 
 ## Contributing
 

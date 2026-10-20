@@ -86,6 +86,8 @@ nav:
       - Designing an experiment: experiments.md
       - "Example: SEG-MIL-CBM": instance-bags.md
       - "Example: Koh et al. 2020": koh2020_reproduction.md
+      - Planned models: models.md
+      - "Planned: data-quality study": data-study.md
   - Extending:
       - Contributing: contributing.md
       - Filing issues: issues.md
