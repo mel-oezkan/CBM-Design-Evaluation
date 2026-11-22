@@ -169,3 +169,32 @@ def test_invalid_combinations_are_refused(base_cfg):
                                    "evaluation": []})  # clip alignment: continuous targets
     with pytest.raises(ValueError, match="binary image-level"):
         run(cfg, save=False)
+
+
+def _diverging_run(finite_epochs: int):
+    """``optimize`` on a linear model whose validation loss is NaN after ``finite_epochs`` epochs."""
+    from cbm_eval.stages.training import OptimizerSpec
+    torch.manual_seed(0)
+    m, x, epoch = torch.nn.Linear(2, 1), torch.randn(8, 2), [0]
+    nan = lambda: epoch[0] > finite_epochs
+
+    def step(idx):
+        loss = m(x[idx]).pow(2).mean()
+        return (loss * float("nan") if nan() else loss), None
+
+    def val():
+        epoch[0] += 1
+        return torch.tensor(float("nan") if nan() else float(m(x).pow(2).mean())), None
+
+    log = optimize([(list(m.parameters()), OptimizerSpec(lr=0.01))], [m], 8, step, val, 4, 4, 10, 0)
+    return m, log
+
+
+def test_training_that_diverges_in_every_epoch_raises():
+    with pytest.raises(RuntimeError, match=r"diverged.*stages\.training\.lr"):
+        _diverging_run(finite_epochs=0)
+
+
+def test_training_that_diverges_later_restores_the_best_finite_epoch():
+    m, log = _diverging_run(finite_epochs=2)
+    assert log["best_epoch"] == 2 and all(torch.isfinite(p).all() for p in m.parameters())

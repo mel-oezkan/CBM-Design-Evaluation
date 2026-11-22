@@ -217,10 +217,18 @@ class _Selection:
         return self.bad >= self.patience
 
     def finish(self, epoch: int) -> dict[str, float]:
-        """Restore the best weights; the log of the phase."""
+        """Restore the best weights; the log of the phase. Raises if the weights the phase ends with are
+        not finite: with a NaN validation loss in every epoch no epoch is ever best, so nothing is
+        restored, and the diverged model would otherwise crash much later in an evaluator."""
         if self.state is not None:
             for m, s in zip(self.modules, self.state):
                 m.load_state_dict(s)
+        if not all(torch.isfinite(t).all() for m in self.modules for t in m.state_dict().values()
+                   if t.is_floating_point()):
+            raise RuntimeError(
+                f"training diverged: the weights are not finite after {epoch} epoch(s) (selection by "
+                f"`{self.select}`, best epoch {self.best_epoch or 'none'}). Lower the learning rate of this "
+                "phase: `stages.training.lr`, `concept_lr` for x -> c, or `finetune.lr` for the backbone.")
         out = {"epochs": epoch, "val_loss": self.best if self.select == "val_loss" else self.val_loss,
                "best_epoch": self.best_epoch}
         return out if self.select == "val_loss" else out | {self.select: self.best}
