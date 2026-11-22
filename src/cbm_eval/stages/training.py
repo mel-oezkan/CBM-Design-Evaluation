@@ -194,11 +194,24 @@ class _Selection:
         self.select, self.patience, self.modules, self.to_cpu, self.log = select, patience, modules, to_cpu, log
         self.best = float("inf") if select == "val_loss" else float("-inf")
         self.state, self.bad, self.best_epoch, self.val_loss = None, 0, 0, float("nan")
+        self.finite_best = False  # whether the saved best weights are finite
+
+    def _finite(self) -> bool:
+        return all(torch.isfinite(t).all() for m in self.modules for t in m.state_dict().values()
+                   if t.is_floating_point())
+
+    def _diverged(self, epoch: int) -> RuntimeError:
+        return RuntimeError(
+            f"training diverged: the weights are not finite after {epoch} epoch(s) (selection by "
+            f"`{self.select}`, best epoch {self.best_epoch or 'none'}). Lower the learning rate of this "
+            "phase: `stages.training.lr`, `concept_lr` for x -> c, or `finetune.lr` for the backbone.")
 
     def update(self, epoch: int, train_acc: float | None, val: tuple[float, float | None] | None,
                **extra: float) -> bool:
         """Record an epoch's running training accuracy and (validation loss, accuracy); True to stop.
-        ``extra`` (training loss, seconds, learning rates) only goes to ``log``."""
+        ``extra`` (training loss, seconds, learning rates) only goes to ``log``. Raises once the weights
+        are not finite and no epoch with finite weights was saved: NaN weights stay NaN, so the phase
+        can no longer end with a usable model. A phase with a finite best epoch trains on and restores it."""
         val_loss, val_acc = val if val is not None else (float("nan"), None)
         if self.select == "val_loss":
             score, better = val_loss, val_loss < self.best - 1e-5
@@ -208,13 +221,17 @@ class _Selection:
         if self.log is not None:
             self.log(epoch=epoch, train_acc=train_acc, val_loss=None if val is None else val_loss, val_acc=val_acc,
                      best=bool(better), **extra)
+        finite = self._finite()
         if better:
             self.best, self.bad, self.best_epoch, self.val_loss = score, 0, epoch, val_loss
             self.state = [{k: t.detach().cpu().clone() for k, t in m.state_dict().items()} if self.to_cpu
                           else copy.deepcopy(m.state_dict()) for m in self.modules]
-            return False
-        self.bad += 1
-        return self.bad >= self.patience
+            self.finite_best = finite
+        else:
+            self.bad += 1
+        if not finite and not self.finite_best:
+            raise self._diverged(epoch)
+        return not better and self.bad >= self.patience
 
     def finish(self, epoch: int) -> dict[str, float]:
         """Restore the best weights; the log of the phase. Raises if the weights the phase ends with are
@@ -223,12 +240,8 @@ class _Selection:
         if self.state is not None:
             for m, s in zip(self.modules, self.state):
                 m.load_state_dict(s)
-        if not all(torch.isfinite(t).all() for m in self.modules for t in m.state_dict().values()
-                   if t.is_floating_point()):
-            raise RuntimeError(
-                f"training diverged: the weights are not finite after {epoch} epoch(s) (selection by "
-                f"`{self.select}`, best epoch {self.best_epoch or 'none'}). Lower the learning rate of this "
-                "phase: `stages.training.lr`, `concept_lr` for x -> c, or `finetune.lr` for the backbone.")
+        if not self._finite():
+            raise self._diverged(epoch)
         out = {"epochs": epoch, "val_loss": self.best if self.select == "val_loss" else self.val_loss,
                "best_epoch": self.best_epoch}
         return out if self.select == "val_loss" else out | {self.select: self.best}
