@@ -169,3 +169,45 @@ def test_invalid_combinations_are_refused(base_cfg):
                                    "evaluation": []})  # clip alignment: continuous targets
     with pytest.raises(ValueError, match="binary image-level"):
         run(cfg, save=False)
+
+
+def _diverging_run(finite_epochs: int, done: list[int] | None = None, select: str = "val_loss",
+                   nan_train: bool = True):
+    """``optimize`` on a linear model whose loss is NaN after ``finite_epochs`` epochs: in training
+    (which makes the weights NaN) unless ``nan_train`` is False, and always in validation. ``done``
+    counts the epochs run."""
+    from cbm_eval.stages.training import OptimizerSpec
+    torch.manual_seed(0)
+    m, x, done = torch.nn.Linear(2, 1), torch.randn(8, 2), [0] if done is None else done
+
+    def step(idx):
+        loss = m(x[idx]).pow(2).mean()
+        return (loss * float("nan") if nan_train and done[0] + 1 > finite_epochs else loss), torch.tensor(0.5)
+
+    def val():
+        done[0] += 1
+        return torch.tensor(float("nan") if done[0] > finite_epochs else float(m(x).pow(2).mean())), None
+
+    log = optimize([(list(m.parameters()), OptimizerSpec(lr=0.01))], [m], 8, step, val, 50, 4, 10, 0,
+                   select=select)
+    return m, log
+
+
+@pytest.mark.parametrize("select", ["val_loss", "train_acc"])
+def test_training_that_diverges_in_every_epoch_raises_after_the_first(select):
+    """With accuracy selection the NaN first epoch is saved as best; it must not count as finite."""
+    done = [0]
+    with pytest.raises(RuntimeError, match=r"diverged.*stages\.training\.lr"):
+        _diverging_run(finite_epochs=0, done=done, select=select)
+    assert done == [1]
+
+
+def test_training_that_diverges_later_restores_the_best_finite_epoch():
+    done = [0]
+    m, log = _diverging_run(finite_epochs=2, done=done)
+    assert log["best_epoch"] == 2 and done == [12] and all(torch.isfinite(p).all() for p in m.parameters())
+
+
+def test_nan_validation_loss_with_finite_weights_does_not_raise():
+    m, log = _diverging_run(finite_epochs=0, nan_train=False)
+    assert log["best_epoch"] == 0 and all(torch.isfinite(p).all() for p in m.parameters())
