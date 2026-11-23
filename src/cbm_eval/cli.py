@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from . import analysis, registry
-from .config import load_ablation, load_config, load_yaml, parse_override
+from . import analysis, cache, registry
+from .config import DEFAULT_PATHS, load_ablation, load_config, load_yaml, parse_override
 from .pipeline import EVAL_KEYS, evaluate_saved, run, sweep
 from .results import ResultsStore
 from .tracking import WandbTracker
@@ -97,6 +97,14 @@ def cmd_list(args) -> None:
         print(f"{kind:<11} {', '.join(reg.names())}")
 
 
+def cmd_cache_prune(args) -> None:
+    removed = cache.prune(args.cache, args.unused_days, dry_run=args.dry_run)
+    verb = "would delete" if args.dry_run else "deleted"
+    for path in removed:
+        print(f"{verb} {path}")
+    print(f"{verb} {len(removed)} cache file(s) unused for {args.unused_days:g} days")
+
+
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(prog="cbm-eval")
     p.add_argument("-v", "--verbose", action="store_true")
@@ -135,6 +143,14 @@ def main(argv: list[str] | None = None) -> None:
     a.set_defaults(func=cmd_analyze)
 
     sub.add_parser("list", help="list registered components").set_defaults(func=cmd_list)
+
+    c = sub.add_parser("cache", help="manage the on-disk cache").add_subparsers(dest="cache_cmd", required=True)
+    cp = c.add_parser("prune", help="delete augmented views and patch features that no run used for some days "
+                                    "(clean features and LLM/VLM caches stay)")
+    cp.add_argument("--cache", default=DEFAULT_PATHS["cache"], help="cache directory (paths.cache)")
+    cp.add_argument("--unused-days", type=float, default=cache.DEFAULT_UNUSED_DAYS)
+    cp.add_argument("--dry-run", action="store_true", help="list what would be deleted, delete nothing")
+    cp.set_defaults(func=cmd_cache_prune)
 
     args = p.parse_args(argv)
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING,

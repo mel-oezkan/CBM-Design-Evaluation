@@ -10,6 +10,7 @@ import torch
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset as TorchDataset
 
+from ..cache import mark_used
 from ..structures import FeatureSplit
 from ..utils import rng_preserved, stable_hash
 from .base import ImageDataset
@@ -24,11 +25,14 @@ def load_features(dataset: ImageDataset, backbone, split: str, cache_dir: str | 
         key["keypoints"] = stable_hash([s.keypoints for s in dataset.samples(split)])
     path = Path(cache_dir) / "features" / dataset.name / f"{split}-{stable_hash(key)}.pt"
     if path.exists():
-        return FeatureSplit(**torch.load(path, weights_only=False))
-    with rng_preserved():  # a cold cache must not shift the run's random draws (see ``rng_preserved``)
-        data = _extract(dataset, backbone, split, patches, batch_size, num_workers)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(data, path)
+        data = torch.load(path, weights_only=False)
+    else:
+        with rng_preserved():  # a cold cache must not shift the run's random draws (see ``rng_preserved``)
+            data = _extract(dataset, backbone, split, patches, batch_size, num_workers)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(data, path)
+    if patches:  # large: prunable when unused (``cache.prune``); clean features stay
+        mark_used(path)
     return FeatureSplit(**data)
 
 
@@ -123,6 +127,7 @@ def load_augmented_features(dataset: ImageDataset, backbone, split: str, cache_d
            "seed": seed, "transform": repr(backbone.train_transform())}
     path = Path(cache_dir) / "features" / dataset.name / f"{split}-views-{stable_hash(key)}.pt"
     if path.exists():
+        mark_used(path)  # large: prunable when unused (``cache.prune``)
         return torch.load(path)
     images = _SeededViews(dataset.torch_split(split, backbone.train_transform()), views, seed)
     feats = []
@@ -140,4 +145,5 @@ def load_augmented_features(dataset: ImageDataset, backbone, split: str, cache_d
                          "the backbone's features are out of range (are its weights loaded?)")
     path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(out, path)
+    mark_used(path)
     return out
