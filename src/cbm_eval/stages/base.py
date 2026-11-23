@@ -227,10 +227,13 @@ class Training(ABC):
     ``num_workers`` is the dataloader width for those images.
     ``needs_aux``: when True, the stage reads the backbone's auxiliary tap (``Backbone.aux_dim``,
     ``ctx.aux_features``) and ``encoder`` carries it (``Backbone.encoder(aux=True)``).
+    ``needs_batch_augment``: when True, the stage augments decoded image batches with the backbone's
+    ``augment_batch`` (``Backbone.batch_augment``).
     """
 
     trains_backbone: bool = False
     needs_aux: bool = False
+    needs_batch_augment: bool = False
     num_workers: int = 0
 
     @abstractmethod

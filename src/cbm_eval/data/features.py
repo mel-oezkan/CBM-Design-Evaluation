@@ -1,5 +1,5 @@
 """Extract and cache backbone features per (dataset, backbone, split), augmented views of them, and
-features of its auxiliary tap."""
+features of its auxiliary tap; decode a split's images once for fine-tuning (``decode_split``)."""
 
 from __future__ import annotations
 
@@ -98,6 +98,29 @@ def encode_split(images, encoder: torch.nn.Module, device, batch_size: int = 128
     feats = [encoder(batch["image"].to(device)).float().cpu() for batch in loader]
     encoder.train(was_training)
     return torch.cat(feats)
+
+
+def _decoded_items(items: list[dict]) -> list[torch.Tensor]:
+    """Collate (in a worker): untransformed PIL images -> uint8 tensors (3, H, W)."""
+    from PIL import Image
+    from torchvision.transforms.functional import pil_to_tensor
+
+    if not all(isinstance(item["image"], Image.Image) for item in items):
+        raise ValueError("`stages.training.finetune.input: decoded` needs a dataset of image files; this one "
+                         "yields tensors. Use `finetune.input: pil`")
+    return [pil_to_tensor(item["image"]) for item in items]
+
+
+def decode_split(images: TorchDataset, num_workers: int = 0) -> list[torch.Tensor]:
+    """Untransformed images of a split (``torch_split(split, None)``) -> uint8 tensors (3, H, W) at their
+    own size, in order. ``num_workers`` only schedules the decoding."""
+    out: list[torch.Tensor] = []
+    with rng_preserved():  # its own generator too: a DataLoader draws a base seed even unshuffled
+        loader = DataLoader(images, batch_size=64, num_workers=num_workers, collate_fn=_decoded_items,
+                            generator=torch.Generator())
+        for batch in loader:
+            out += batch
+    return out
 
 
 class _SeededViews(TorchDataset):

@@ -518,6 +518,100 @@ def training_extras() -> dict:
     return out
 
 
+@app.function(image=image, volumes={VOL: vol}, gpu="A100-40GB", cpu=16, memory=65536, timeout=3600)
+def profile_fast_path(epochs: int = 3, steps: int = 20) -> dict:
+    """The fine-tuning speed options on the ``cub_koh2020`` joint model, auxiliary head included, all in
+    one container (speed differs by ~10% between containers):
+
+    - ``fit``: seconds per epoch of the real joint fit (``Training.fit`` on the CUB context) for the
+      original path (``input: pil``, fp32), the fast path (``input: decoded, precision: bf16,
+      channels_last``) and the fast path with ``compile`` (its first epoch includes compiling);
+    - ``augment_ms``: ``augment_batch`` on 64 images from the padded store (one gather) and from a list
+      (padded per batch);
+    - ``step_ms``: one bf16 channels-last encoder step on a fixed batch (forward with the auxiliary tap,
+      Koh et al.'s losses, backward, SGD): the floor of the fast path.
+    """
+    import os
+    import tarfile
+
+    import torch
+    import torch.nn.functional as F
+
+    from cbm_eval.backbones.augment import PaddedImages, pad_images
+    from cbm_eval.config import load_config
+    from cbm_eval.pipeline import PipelineBuilder
+    from cbm_eval.tracking import History
+
+    work = Path("/root/work")
+    (work / "data").mkdir(parents=True, exist_ok=True)
+    with tarfile.open(CUB_TGZ) as t:
+        t.extractall(work / "data")
+    for link, target in {work / "data" / "CUB_processed": Path(VOL, "data", "CUB_processed"),
+                         work / ".cache": Path(VOL, "cache")}.items():
+        link.symlink_to(target)
+    os.chdir(work)
+    fast = {"input": "decoded", "precision": "bf16", "channels_last": True}
+    variants = {"original": {}, "fast": fast, "fast+compile": fast | {"compile": True}}
+    builders = {name: PipelineBuilder(load_config("/root/configs/anchors/cub_koh2020.yaml", {
+        "stages.training.device": "cuda", "device": "cuda", "seed": 1, "stages.training.finetune.epochs": epochs,
+        **{f"stages.training.finetune.{k}": v for k, v in opts.items()}})) for name, opts in variants.items()}
+    base = builders["original"]
+    ctx = base.context()
+    aligned = base.alignment.fit(base.concepts(ctx), ctx)
+    dev, sync = torch.device("cuda"), torch.cuda.synchronize
+    out = {"gpu": torch.cuda.get_device_name(), "torch": torch.__version__, "fit": {}}
+    t = time.perf_counter()
+    images = [im for s in ("train", "val") for im in ctx.decoded(s, 16)]
+    out["decode_train_val_s"] = time.perf_counter() - t
+
+    for name, builder in builders.items():
+        torch.manual_seed(1)
+        ctx.history = History()
+        layer = base.generation.build(ctx.feat_dim, aligned)
+        head = base.predictor.build(layer.rep_dim, ctx.num_classes, ctx.feat_dim)
+        t = time.perf_counter()
+        builder.training.fit(layer, head, aligned, ctx, encoder=ctx.backbone.encoder(aux=True))
+        out["fit"][name] = {"epoch_s": [round(r["seconds"], 3) for r in ctx.history.rows if r["phase"] == "joint"],
+                            "fit_total_s": round(time.perf_counter() - t, 1)}
+        torch.cuda.empty_cache()
+
+    bb, g = ctx.backbone, torch.Generator().manual_seed(0)
+    store = pad_images(images, dev)
+    idx = torch.randperm(len(images), generator=g)[:64]
+    idx_dev, listed = idx.to(dev), [images[i].to(dev) for i in idx.tolist()]
+    out["augment_ms"] = {
+        "padded_store": 1e3 * _timed(lambda: bb.augment_batch(PaddedImages(store.pixels[idx_dev], store.sizes[idx]), g),
+                                     steps, sync),
+        "list_padded_per_batch": 1e3 * _timed(lambda: bb.augment_batch(listed, g), steps, sync),
+    }
+    fixed = bb.augment_batch(listed, g)
+
+    k, n_cls = len(aligned.concepts), ctx.num_classes
+    y, c = torch.randint(0, n_cls, (64,), device=dev), torch.randint(0, 2, (64, k), device=dev).float()
+    enc = bb.encoder(aux=True).to(dev).train().to(memory_format=torch.channels_last)
+    lin, lin_aux, cls = torch.nn.Linear(2048, k).to(dev), torch.nn.Linear(768, k).to(dev), torch.nn.Linear(k, n_cls).to(dev)
+    opt = torch.optim.SGD([*enc.parameters(), *lin.parameters(), *lin_aux.parameters(), *cls.parameters()],
+                          lr=1e-3, momentum=0.9, weight_decay=4e-4)
+
+    def step():
+        with torch.autocast("cuda", dtype=torch.bfloat16):
+            x, xa = enc.forward_aux(fixed.contiguous(memory_format=torch.channels_last))
+        logits, la = lin(x.float()), lin_aux(xa.float())
+        loss = F.cross_entropy(cls(logits), y) + 1.12 * F.binary_cross_entropy_with_logits(logits, c) + \
+            0.4 * (F.cross_entropy(cls(la), y) + 1.12 * F.binary_cross_entropy_with_logits(la, c))
+        opt.zero_grad()
+        loss.backward()
+        opt.step()
+
+    out["step_ms"] = {"bf16_channels_last_aux": 1e3 * _timed(step, steps, sync)}
+    return out
+
+
+@app.local_entrypoint()
+def fast_path():
+    print(json.dumps(profile_fast_path.remote(), indent=1))
+
+
 @app.local_entrypoint()
 def training():
     print(json.dumps(training_extras.remote(), indent=1))

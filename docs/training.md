@@ -223,6 +223,34 @@ also trains on the validation images, augmented like the training images, and se
 accuracy as on a frozen backbone. It can't be combined with `augment:`, because it augments the
 images itself.
 
+### Faster fine-tuning
+
+By default the dataloader workers decode every training JPEG and augment it with PIL, in every
+epoch. On an A100 this is the limit: 8 workers deliver about 456 images/s, while the GPU trains
+Inception-v3 at 580 images/s in fp32 and 1,117 images/s in bf16 with channels-last memory
+(`reports/speedups.html`). Four opt-in `finetune:` options remove that limit:
+
+| Option | Default | What it does |
+|---|---|---|
+| `input: decoded` | `pil` | Decodes the training images once (`Context.decoded`: uint8 at their own size, 3.23 GB for CUB train + val) and keeps them on the training device. Each batch is augmented there by the backbone's `augment_batch` (`inception`). |
+| `precision: bf16` | `fp32` | Runs the encoder's training forward pass under bf16 autocast. Weights, concept layer, head, validation and evaluation stay fp32. |
+| `channels_last: true` | `false` | Channels-last memory for the encoder and its batches; faster convolutions on tensor-core GPUs. |
+| `compile: true` | `false` | Runs the encoder's training forward pass through `torch.compile`, which fuses the operations between the convolutions into Triton kernels. Compiling takes minutes once per run. |
+
+```yaml
+finetune: {epochs: 1000, ..., input: decoded, precision: bf16, channels_last: true}
+```
+
+With `input: decoded`, the training images are padded once into one tensor (4.5 GB for CUB), so
+each batch is one gather. If padding would more than double the memory, they stay a list and each
+batch is padded on its own; both give the same crops. `input: decoded` draws its crops, flips and
+colour jitter from the same distributions as
+`train_transform`, from a generator seeded by the run's seed, so a run repeats exactly and no
+longer depends on `num_workers`. The pixels differ from the PIL path: `roi_align` resamples the
+crop, and the jitter runs after the crop (see `backbones/augment.py`). These options, and
+`compile` (other rounding, other dropout draws), therefore change results. `configs/ablations/cub_koh2020_speed.yaml` compares them with the original path
+over three seeds; the anchors keep the original path until then.
+
 ## Auxiliary concept head
 
 With `aux: {weight: 0.4, init_std: 0.001}`, training adds Koh et al.'s auxiliary Inception head

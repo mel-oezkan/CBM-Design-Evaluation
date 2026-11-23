@@ -18,7 +18,7 @@ from torch.utils.data import Dataset as TorchDataset
 from .backbones.base import Backbone
 from .config import ExperimentConfig
 from .data.base import SPLITS, ImageDataset
-from .data.features import encode_split, load_augmented_features, load_aux_features, load_features
+from .data.features import decode_split, encode_split, load_augmented_features, load_aux_features, load_features
 from .data.parts import input_geometry, load_parts
 from .stages.common import match_names
 from .structures import Bag, ConceptSet, FeatureSplit, InstanceSplit, PartSplit
@@ -49,6 +49,7 @@ class Context:
         self._images: dict[tuple[str, bool], TorchDataset] = {}
         self._aux: dict[str, torch.Tensor] = {}
         self._views: dict[tuple[str, int, int], torch.Tensor] = {}
+        self._decoded: dict[str, list[torch.Tensor]] = {}
         self._workers = 0  # dataloader workers for encoding images with the fine-tuned encoder
         for bb in {id(b): b for b in (self.backbone, self.teacher) if b is not None}.values():
             bb.to(self.device)
@@ -118,6 +119,16 @@ class Context:
             self._views[key] = load_augmented_features(dataset, self.backbone, split, self.cache_dir, views, seed,
                                                        batch_size, num_workers)
         return self._views[key]
+
+    def decoded(self, name: str, num_workers: int = 0) -> list[torch.Tensor]:
+        """Images of a split decoded once, as uint8 tensors (3, H, W) at their own size, kept in memory
+        (not on disk); rows are aligned with ``split(name)``. Fine-tuning with ``finetune: {input:
+        decoded}`` augments them in batches (``Backbone.augment_batch``). ``num_workers`` only schedules
+        the decoding."""
+        if name not in self._decoded:
+            dataset, split = self.source(name)
+            self._decoded[name] = decode_split(dataset.torch_split(split, None), num_workers)
+        return self._decoded[name]
 
     def image_split(self, name: str, augment: bool = False) -> TorchDataset:
         """Images of a split as a torch dataset of dicts (``image``, ``label``, ``index``, ...), with

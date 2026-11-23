@@ -124,7 +124,8 @@ How the stages divide the work:
   `raw: true`), a CEM-style embedding mixed by
   concept probability, or a hard 0/1 bit (straight-through in joint training).
 - **Training** fits on cached frozen features by default. With `finetune: {epochs, lr, optimizer,
-  momentum, weight_decay, lr_step, lr_gamma, batch_size, patience, augment, num_workers}` it also
+  momentum, weight_decay, lr_step, lr_gamma, batch_size, patience, augment, num_workers, input, precision,
+  channels_last, compile}` it also
   trains the backbone end to end (backbones with `trainable = True`: `inception`, `toy`): images go
   through a trainable copy of the encoder, optimized with the concept layer (x → c phase of
   `independent`/`sequential`) or with layer and head (`joint`). Afterwards the run's inputs, and so
@@ -133,5 +134,8 @@ How the stages divide the work:
   `part_iou`). With `aux: {weight, init_std}` it adds Koh et al.'s auxiliary concept head on the
   backbone's auxiliary tap (`Backbone.aux_dim`: Inception's `AuxLogits` on `Mixed_6e`). The head is
   trained only during `fit`, and in `joint` training its concepts also pass through the head.
+  The opt-in speed options `input: decoded` (needs a backbone with `batch_augment = True`:
+  `inception`), `precision: bf16`, `channels_last` and `compile` are described in
+  [Faster fine-tuning](training.md#faster-fine-tuning); they change results.
 - Non-CLIP backbones need a text-capable `teacher:` for `clip` alignment and the `clip`/`select`
   filters (see `configs/ablations/waterbirds_backbones.yaml`).
