@@ -72,7 +72,13 @@ class DatasetDiscovery(Discovery):
         names = ctx.dataset.concept_names
         if not names:
             raise RuntimeError(f"Dataset '{ctx.dataset.name}' has no annotated concepts")
-        text_of = dict(zip(names, ctx.dataset.concept_text())) if self.text == "readable" else {}
+        text_of = {}
+        if self.text == "readable":
+            texts = ctx.dataset.concept_text()
+            if texts is None or len(texts) != len(names):
+                raise ValueError(f"{type(ctx.dataset).__name__}.concept_text() must return one text per concept "
+                                 f"({len(names)}); fix it or set `stages.discovery.text: name`")
+            text_of = dict(zip(names, texts))
         names = list(dict.fromkeys(names + self.extra))
         meta = [{"source": "dataset", **({"text": text_of.get(n, n)} if text_of else {})} for n in names]
         return ConceptSet(names=names, meta=meta)

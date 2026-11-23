@@ -122,7 +122,11 @@ class InstanceSplit:
 
 @dataclass
 class ConceptSet:
-    """Candidate concepts. ``vectors`` are directions in backbone feature space (e.g. SAE latents)."""
+    """Candidate concepts. ``vectors`` are directions in backbone feature space (e.g. SAE latents).
+
+    ``names`` are the keys that annotations, parts and evaluators match on. ``meta["text"]`` is reserved:
+    where set, text encoders and detectors read it instead of the name (see ``texts``).
+    """
 
     names: list[str]
     vectors: torch.Tensor | None = None  # (K, D)

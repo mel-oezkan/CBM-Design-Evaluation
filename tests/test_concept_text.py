@@ -60,3 +60,63 @@ def test_text_encoders_read_texts():
     concepts = ConceptSet(["has_wing_color::blue", "beak"], meta=[{"text": "blue wing color"}, {}])
     concept_embeddings(concepts, ctx)
     assert seen == [["blue wing color", "beak"]]
+
+
+READABLE = ConceptSet(["has_wing_color::blue", "beak"], meta=[{"text": "blue wing color"}, {}])
+
+
+def _recording_ctx(seen, **kw):
+    def encode_text(texts, which="teacher"):
+        seen.append(list(texts))
+        return torch.ones(len(texts), 3)
+    return SimpleNamespace(encode_text=encode_text, concepts=READABLE, **kw)
+
+
+def test_alignments_read_texts():
+    from cbm_eval.stages.alignment import SegmentCLIPAlignment, WeightAlignment
+
+    seen = []
+    WeightAlignment().fit(READABLE, _recording_ctx(seen, backbone=SimpleNamespace(has_text=True)))
+    SegmentCLIPAlignment().fit(READABLE, _recording_ctx(seen, instance_source=object()))
+    assert seen == [READABLE.texts] * 2
+
+
+class _RecordingDetector:
+    def __init__(self):
+        self.prompts = []
+
+    def detect(self, images, prompts):
+        self.prompts += prompts
+        return [[] for _ in images]
+
+
+def test_detectors_read_texts(tmp_path):
+    from PIL import Image
+
+    from cbm_eval.instances.segments import GroundedBoxes
+    from cbm_eval.stages.scorers import GroundingDINOScorer
+
+    image = Image.new("RGB", (8, 8))
+    seen, det = [], _RecordingDetector()
+    teacher = SimpleNamespace(features=torch.ones(2, 3))
+    ctx = _recording_ctx(seen, samples=lambda split: [0, 0], teacher_split=lambda split: teacher, device="cpu")
+    GroundedBoxes(top_k=1, detector=det).prepare(ctx, "train")  # ranks concepts per image by the teacher's text
+    assert seen == [READABLE.texts]
+    src = GroundedBoxes(top_k=None, detector=det)  # prompts every concept
+    src.prepare(ctx, "train")
+    src.propose([image, image], [0, 1], ctx)
+    assert det.prompts == [READABLE.texts] * 2
+
+    image.save(tmp_path / "a.png")
+    scorer = GroundingDINOScorer()
+    scorer.detector = det = _RecordingDetector()
+    ctx = SimpleNamespace(split=lambda split: SimpleNamespace(paths=[str(tmp_path / "a.png")]), device="cpu")
+    scorer._detect(READABLE, ctx, "val")
+    assert det.prompts == [READABLE.texts]
+
+
+def test_readable_text_needs_one_text_per_concept(cub_root):
+    ds = CUB(root=str(cub_root), min_class_count=0)
+    ds.concept_text = lambda: ["only one"]
+    with pytest.raises(ValueError, match="stages.discovery.text: name"):
+        DatasetDiscovery(text="readable").discover(SimpleNamespace(dataset=ds))

@@ -24,7 +24,8 @@
 #     the alignment targets only when some concept has no annotation. All `dataset` concepts are
 #     annotated, so that arm reports no `intervention.*` metrics; the `sae` arm does. Compare `probe.*`.
 #   - No `concepts` evaluator: it reports nothing for a continuous concept layer (`alignment: clip`).
-#   - CLIP text template `{}` (backbone default), so the feature cache is the one cub_human uses.
+#   - CLIP text template `{}` (backbone default, as in cub_human): CLIP reads the bare phrase, not e.g.
+#     `a photo of a bird with {}`. The template changes only text embeddings, not the feature cache.
 name: cub_clip
 dataset: {name: cub, root: data/CUB_200_2011}
 backbone: {name: clip, model: ViT-B-16, pretrained: openai}
