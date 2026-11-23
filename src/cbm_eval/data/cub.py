@@ -57,6 +57,15 @@ _SEG_GROUPS = ["body", "head", "neck", "beak", "tail", "wing", "leg", "eye"]
 _SEG_FILES = {g: [f"left_{g}", f"right_{g}"] if g in ("eye", "wing", "leg") else [g] for g in _SEG_GROUPS}
 
 
+def readable_attribute(name: str) -> str:
+    """A CUB attribute key as a phrase for a text encoder: ``has_bill_shape::curved_(up_or_down)`` ->
+    ``curved (up or down) bill shape`` (value, then the attribute without ``has_``). Other names are kept."""
+    if "::" not in name:
+        return name
+    stem, value = name.split("::", 1)
+    return f"{value} {stem.removeprefix('has_')}".replace("_", " ")
+
+
 def _group(part: str) -> str:
     return part.removeprefix("left ").removeprefix("right ")
 
@@ -108,6 +117,10 @@ class CUB(ImageDataset):
     @property
     def concept_names(self) -> list[str]:
         return self._attr_names
+
+    def concept_text(self) -> list[str]:
+        """``concept_names`` as readable phrases (``readable_attribute``), for ``text: readable``."""
+        return [readable_attribute(n) for n in self._attr_names]
 
     def class_concepts(self) -> torch.Tensor | None:
         """The majority-voted (200, K) class attributes; None with image-level concepts."""

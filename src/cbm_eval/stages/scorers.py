@@ -52,7 +52,7 @@ class GroundingDINOScorer:
         return {"name": "grounding_dino", **self.kw}
 
     def score(self, concepts: ConceptSet, ctx: "Context", split: str) -> torch.Tensor:
-        key = {"scorer": self.cache_key(), "data": ctx.dataset.cache_key(), "split": split, "concepts": concepts.names}
+        key = {"scorer": self.cache_key(), "data": ctx.dataset.cache_key(), "split": split, "concepts": concepts.text_key()}
         path = ctx.cache_dir / "scores" / f"gdino-{split}-{stable_hash(key)}.pt"
         if path.exists():
             return torch.load(path)
@@ -79,7 +79,7 @@ class GroundingDINOScorer:
         for start in range(0, len(paths), self.batch_size):
             images = [Image.open(p).convert("RGB") for p in paths[start : start + self.batch_size]]
             for chunk in chunks:
-                names = [concepts.names[k] for k in chunk]
+                names = [concepts.texts[k] for k in chunk]
                 for b, dets in enumerate(self.detector.detect(images, [names] * len(images))):
                     for d in dets:
                         if d.label >= 0:

@@ -52,7 +52,8 @@ per-config means and the effect of each design choice with confidence intervals.
   localization, part localization, faithfulness
 
 Ready-made configs live in [`configs/anchors/`](configs/anchors) (including the
-[Koh et al. 2020 reproduction](docs/koh2020_reproduction.md) and SEG-MIL-CBM) and
+[Koh et al. 2020 reproduction](docs/koh2020_reproduction.md), SEG-MIL-CBM and the CUB discovery study,
+`cub_clip.yaml`) and
 [`configs/ablations/`](configs/ablations).
 
 ## Documentation

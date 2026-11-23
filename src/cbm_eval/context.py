@@ -149,7 +149,8 @@ class Context:
 
         if self.instance_source is None:
             raise RuntimeError("No instance source configured; set `instances:` in the config")
-        concepts = tuple(self.concepts.names) if self.instance_source.needs_concepts and self.concepts else None
+        concepts = (tuple(self.concepts.names), tuple(self.concepts.texts)) \
+            if self.instance_source.needs_concepts and self.concepts else None
         key = (name, concepts)
         if key not in self._instances:
             self._instances[key] = load_instances(self, self.instance_source, name)

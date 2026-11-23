@@ -8,6 +8,7 @@ import shutil
 from types import SimpleNamespace
 
 import pytest
+import torch
 
 from cbm_eval.backbones.inception import InceptionBackbone
 from cbm_eval.backbones.toy import ToyBackbone
@@ -20,6 +21,7 @@ from cbm_eval.instances.segments import GroundedBoxes, GroundedSAM, SAMGrid
 from cbm_eval.stages.llm import ClaudeClient
 from cbm_eval.stages.scorers import GroundingDINOScorer
 from cbm_eval.structures import ConceptSet
+from cbm_eval.utils import stable_hash
 
 SEGMENT_PARAMS = {"max_segments": 4, "min_pixels": 10, "max_frac": 0.5, "merge_iou": 0.5, "encode": "pool",
                   "margin": 0.2, "background": "keep"}
@@ -134,3 +136,23 @@ def test_patch_feature_cache_keys_on_keypoints(tmp_path):
     assert cache() == before
     load_features(ds, bb, "test", tmp_path, patches=True)
     assert len(cache()) == len(before) + 1
+
+
+def test_concept_text_keys_only_when_it_differs_from_names(tmp_path):
+    """Detector scores and concept-guided segments are computed from ``ConceptSet.texts`` (issue #79).
+    Readable text must miss the cache; concepts without text keep the key they had before texts existed."""
+    names = ["has_wing_color::blue", "has_bill_shape::dagger"]
+    plain, readable = ConceptSet(names), ConceptSet(names, meta=[{"text": "blue wing color"}, {}])
+    for source in (GroundedSAM(), GroundedBoxes()):
+        key = lambda c: source.cache_key(SimpleNamespace(concepts=c, teacher=None))
+        assert key(plain)["segments"]["concepts"] == stable_hash(names)  # the key before texts existed
+        assert key(readable) != key(plain)
+
+    scorer, calls = GroundingDINOScorer(), []
+    scorer._detect = lambda c, ctx, split: calls.append(c.texts) or torch.zeros(2, len(c))
+    ctx = SimpleNamespace(cache_dir=tmp_path, dataset=SimpleNamespace(cache_key=lambda: {"name": "d"}))
+    for c in (plain, plain, readable):
+        scorer.score(c, ctx, "val")
+    assert calls == [names, readable.texts]  # the second call is a cache hit
+    old = {"scorer": scorer.cache_key(), "data": {"name": "d"}, "split": "val", "concepts": names}
+    assert (tmp_path / "scores" / f"gdino-val-{stable_hash(old)}.pt").exists()

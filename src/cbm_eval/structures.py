@@ -139,6 +139,18 @@ class ConceptSet:
     def __len__(self) -> int:
         return len(self.names)
 
+    @property
+    def texts(self) -> list[str]:
+        """What text encoders and detectors read: ``meta["text"]`` where set (e.g. a readable CUB
+        attribute, see ``ImageDataset.concept_text``), else the name. Names stay the matching key."""
+        return [m.get("text", n) for n, m in zip(self.names, self.meta)]
+
+    def text_key(self) -> list:
+        """Cache-key part for results computed from ``texts``: the names alone while every text is its
+        name (so existing keys stay valid), else names and texts."""
+        texts = self.texts
+        return self.names if texts == self.names else [self.names, texts]
+
     def subset(self, idx: list[int]) -> "ConceptSet":
         return replace(
             self,

@@ -14,10 +14,10 @@ if TYPE_CHECKING:
 
 
 def concept_embeddings(concepts: ConceptSet, ctx: "Context") -> torch.Tensor:
-    """Unit-norm concept embeddings: SAE-style vectors if present, else teacher text embeddings."""
+    """Unit-norm concept embeddings: SAE-style vectors if present, else teacher embeddings of ``texts``."""
     if concepts.vectors is not None:
         return F.normalize(concepts.vectors.float(), dim=1)
-    return F.normalize(ctx.encode_text(concepts.names), dim=1)
+    return F.normalize(ctx.encode_text(concepts.texts), dim=1)
 
 
 def concept_activations(concepts: ConceptSet, ctx: "Context", split: str) -> torch.Tensor:
