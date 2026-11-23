@@ -22,7 +22,9 @@ def _normalize(name: str) -> str:
 
 @FILTERING.register("rules")
 class RuleFilter(Filter):
-    """Text rules: length limits, near-duplicate names, and concepts that name a class."""
+    """Text rules: length limits, near-duplicate names, and concepts that name a class.
+
+    The rules act on ``names``, not ``texts``, so ``discovery.text`` never changes what they keep."""
 
     def __init__(self, max_words: int = 4, min_chars: int = 2, remove_class_names: bool = True,
                  dedupe: bool = True, blocklist: list[str] | None = None):

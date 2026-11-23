@@ -1,0 +1,11 @@
+# Discovery study on CUB, step 1 (tracker #80): annotated attributes (`dataset`, the anchor) vs
+# sparse-autoencoder latents (`sae`) on the same frozen CLIP features. Everything else stays at
+# configs/anchors/cub_clip.yaml, including `select` with k = 93 (see the anchor's header comment).
+# 2 configurations x 3 seeds = 6 runs. Step 2 adds the `llm` / `vlm` / `kb` arms (#87).
+# `n_latents: 512` as in waterbirds_discovery.yaml; the rest are the `sae` defaults.
+anchor: ../anchors/cub_clip.yaml
+mode: ofat
+seeds: [0, 1, 2]
+factors:
+  stages.discovery:
+    - {name: sae, n_latents: 512}

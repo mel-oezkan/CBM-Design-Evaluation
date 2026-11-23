@@ -46,7 +46,7 @@ class WeightAlignment(Alignment):
         if concepts.vectors is not None:
             weight = concepts.vectors
         elif ctx.backbone.has_text:
-            weight = ctx.encode_text(concepts.names, which="backbone")
+            weight = ctx.encode_text(concepts.texts, which="backbone")
         else:
             raise RuntimeError("weights alignment needs concept vectors or a backbone with a text encoder")
         return AlignedConcepts(concepts, target_type=None, init_weight=weight, frozen=self.frozen)
@@ -104,7 +104,7 @@ class SegmentCLIPAlignment(Alignment):
             raise RuntimeError("segment_clip alignment needs instance bags; set `instances:` in the config")
         if concepts.vectors is not None:
             raise RuntimeError("segment_clip alignment needs named concepts with text embeddings")
-        text = F.normalize(ctx.encode_text(concepts.names).float(), dim=1)
+        text = F.normalize(ctx.encode_text(concepts.texts).float(), dim=1)
 
         def cosine(split):
             inst = ctx.instances(split)

@@ -122,7 +122,7 @@ class SegmentSource(InstanceSource):
     def segment_key(self, ctx) -> dict[str, Any]:
         key = {"name": self.name, **self.seg_kw}
         if self.needs_concepts:
-            key["concepts"] = stable_hash(_concepts(ctx).names)
+            key["concepts"] = stable_hash(_concepts(ctx).text_key())
         return key
 
     def cache_key(self, ctx):
@@ -295,7 +295,7 @@ class GroundedSAM(SegmentSource):
             self._prompts = [list(range(len(concepts)))] * n
             return
         img = F.normalize(ctx.teacher_split(split).features.float(), dim=1)
-        txt = F.normalize(ctx.encode_text(concepts.names).float(), dim=1)
+        txt = F.normalize(ctx.encode_text(concepts.texts).float(), dim=1)
         self._prompts = (img @ txt.T).topk(self.top_k, dim=1).indices.tolist()
 
     def propose(self, images, index, ctx):
@@ -305,7 +305,7 @@ class GroundedSAM(SegmentSource):
             self.detector = GroundingDINODetector(device=ctx.device, **self.detector_kw)
         if self.use_sam and self.sam is None:
             self.sam = SAMSegmenter(device=ctx.device, **self.sam_kw)
-        names = ctx.concepts.names
+        names = ctx.concepts.texts  # detector prompts
         prompts = [self._prompts[i] for i in index]
         detections = self.detector.detect(images, [[names[k] for k in ks] for ks in prompts])
         out = []

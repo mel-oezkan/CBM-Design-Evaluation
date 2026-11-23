@@ -73,6 +73,12 @@ class ImageDataset(ABC):
         """Names of human-annotated concepts, or None if the dataset has no annotations."""
         return None
 
+    def concept_text(self) -> list[str] | None:
+        """Readable text for each of ``concept_names`` (same order), for text encoders and detectors.
+        Read only by ``discovery: {name: dataset, text: readable}``. Override when the names are keys
+        rather than phrases (CUB's ``has_bill_shape::dagger``); the default is the names."""
+        return None if self.concept_names is None else list(self.concept_names)
+
     def class_concepts(self) -> torch.Tensor | None:
         """(C, K_h) class-level concept labels (rows ``class_names``, columns ``concept_names``), or
         None. Eval datasets without their own concept annotations inherit labels through this."""

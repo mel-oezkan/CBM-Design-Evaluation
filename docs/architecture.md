@@ -115,6 +115,11 @@ patch features.
 
 How the stages divide the work:
 
+- **Discovery** names the concepts. `ConceptSet.names` is the key that `human` alignment and the
+  annotation-based evaluators match on; text encoders and detectors read `ConceptSet.texts`, which is
+  `meta["text"]` where a stage set it and the name otherwise. `dataset` sets it only with
+  `text: readable` (the dataset's `concept_text()`, e.g. `blue wing color` for CUB's
+  `has_wing_color::blue`); SAE concepts are vectors and need no text.
 - **Alignment** decides how concept neurons get their meaning. `clip` uses continuous pseudo-labels
   (teacher image–text similarity, as in Label-free CBM); `dino` uses binary pseudo-labels from an
   open-vocabulary detector; `human` uses dataset annotations; `weights` fixes each neuron to the

@@ -52,6 +52,22 @@ def test_every_stage_variant_runs(base_cfg, stage, spec):
     assert res.metrics["shift.test.acc"] > 0.4
 
 
+@pytest.mark.parametrize("discovery", [{"name": "dataset", "text": "readable"},
+                                       {"name": "sae", "n_latents": 32, "k": 4, "epochs": 5}])
+def test_discovery_arms_share_clip_alignment_and_select(base_cfg, discovery):
+    """The stage combination of configs/anchors/cub_clip.yaml and its discovery ablation: every arm
+    ends with the same concept count, and ``concepts`` skips a continuous layer instead of crashing."""
+    cfg = base_cfg.with_overrides({
+        "stages.discovery": discovery, "stages.filtering": [{"name": "select", "k": 16, "method": "submodular"}],
+        "stages.predictor": {"name": "dense"},
+        "evaluation": [{"name": "shift"}, {"name": "leakage", "repeats": 2}, {"name": "concepts"}]})
+    res = run(cfg, save=False)
+    m = res.metrics
+    assert _ok(m), m
+    assert m["n_concepts"] == 16 and m["shift.test.acc"] > 0.3  # 4 classes -> chance is 0.25
+    assert not any(k.startswith("concepts.") for k in m)
+
+
 @pytest.mark.parametrize("parent", [Sequential, Joint])
 def test_task_loss_hook_is_used(base_cfg, parent):
     calls = []

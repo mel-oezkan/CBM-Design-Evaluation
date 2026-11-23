@@ -28,7 +28,7 @@ class InstanceSource(ABC):
         """Everything about this source that changes the instances (the dataset and encoders are added by the caller)."""
         key = {"name": self.name, **self.kw}
         if self.needs_concepts:
-            key["concepts"] = stable_hash(_concepts(ctx).names)
+            key["concepts"] = stable_hash(_concepts(ctx).text_key())
         return key
 
     @abstractmethod

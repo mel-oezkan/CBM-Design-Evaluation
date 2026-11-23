@@ -11,6 +11,9 @@ Point `dataset.root` at:
   "not visible" negatives ignored, ties -> present; 112 concepts), and `split_dir:` takes their
   `CUB_processed/class_attr_data_10` folder (Codalab worksheet 0x362911581fcd4e048ddfd84f47203fd2)
   to use their train/val split. Each attribute is mapped to its body part's keypoint for localization.
+  Concept names are the raw attribute keys (`has_bill_shape::curved_(up_or_down)`). For text
+  encoders, `discovery: {name: dataset, text: readable}` passes the phrase `curved (up or down) bill
+  shape` instead (`CUB.concept_text()`); the names, and so annotation matching, stay unchanged.
   Optional part segmentations for `part_iou` (CUB70, 67 classes):
   `wget https://github.com/hamedbehzadi/CUB70-PartSegmentationDataset/raw/main/AnnotationMasksPerclass.tar.xz`,
   then extract to `<root>/part_segmentations/` (or set `dataset.part_segmentations`).

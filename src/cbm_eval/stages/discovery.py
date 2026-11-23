@@ -55,17 +55,33 @@ class StaticDiscovery(Discovery):
 
 @DISCOVERY.register("dataset")
 class DatasetDiscovery(Discovery):
-    """The dataset's human-annotated concept vocabulary (required for human alignment)."""
+    """The dataset's human-annotated concept vocabulary (required for human alignment).
 
-    def __init__(self, extra: list[str] | None = None):
-        self.extra = extra or []
+    ``text: name`` (default) gives text encoders the names themselves. ``text: readable`` stores the
+    dataset's ``concept_text()`` as ``meta["text"]`` (CUB: ``curved (up or down) bill shape`` for
+    ``has_bill_shape::curved_(up_or_down)``), which every text encoder and detector then reads;
+    the names, and so matching to annotations and parts, stay unchanged. ``extra`` names are their own text.
+    """
+
+    def __init__(self, extra: list[str] | None = None, text: str = "name"):
+        if text not in ("name", "readable"):
+            raise ValueError(f"Unknown dataset concept text '{text}' (use name or readable)")
+        self.extra, self.text = extra or [], text
 
     def discover(self, ctx):
         names = ctx.dataset.concept_names
         if not names:
             raise RuntimeError(f"Dataset '{ctx.dataset.name}' has no annotated concepts")
+        text_of = {}
+        if self.text == "readable":
+            texts = ctx.dataset.concept_text()
+            if texts is None or len(texts) != len(names):
+                raise ValueError(f"{type(ctx.dataset).__name__}.concept_text() must return one text per concept "
+                                 f"({len(names)}); fix it or set `stages.discovery.text: name`")
+            text_of = dict(zip(names, texts))
         names = list(dict.fromkeys(names + self.extra))
-        return ConceptSet(names=names, meta=[{"source": "dataset"} for _ in names])
+        meta = [{"source": "dataset", **({"text": text_of.get(n, n)} if text_of else {})} for n in names]
+        return ConceptSet(names=names, meta=meta)
 
 
 LLM_PROMPTS = {

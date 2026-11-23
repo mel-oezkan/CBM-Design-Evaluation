@@ -122,7 +122,11 @@ class InstanceSplit:
 
 @dataclass
 class ConceptSet:
-    """Candidate concepts. ``vectors`` are directions in backbone feature space (e.g. SAE latents)."""
+    """Candidate concepts. ``vectors`` are directions in backbone feature space (e.g. SAE latents).
+
+    ``names`` are the keys that annotations, parts and evaluators match on. ``meta["text"]`` is reserved:
+    where set, text encoders and detectors read it instead of the name (see ``texts``).
+    """
 
     names: list[str]
     vectors: torch.Tensor | None = None  # (K, D)
@@ -138,6 +142,18 @@ class ConceptSet:
 
     def __len__(self) -> int:
         return len(self.names)
+
+    @property
+    def texts(self) -> list[str]:
+        """What text encoders and detectors read: ``meta["text"]`` where set (e.g. a readable CUB
+        attribute, see ``ImageDataset.concept_text``), else the name. Names stay the matching key."""
+        return [m.get("text", n) for n, m in zip(self.names, self.meta)]
+
+    def text_key(self) -> list:
+        """Cache-key part for results computed from ``texts``: the names alone while every text is its
+        name (so existing keys stay valid), else names and texts."""
+        texts = self.texts
+        return self.names if texts == self.names else [self.names, texts]
 
     def subset(self, idx: list[int]) -> "ConceptSet":
         return replace(

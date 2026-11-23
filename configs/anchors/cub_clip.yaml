@@ -1,0 +1,42 @@
+# Where do concepts come from? Discovery study on CUB (tracker #80), step 1 anchor: CUB's annotated
+# attributes as concepts, aligned by CLIP pseudo-labels instead of the annotations (cf. cub_human).
+# configs/ablations/cub_discovery.yaml swaps `discovery` and holds everything else at this anchor.
+#
+# Fixed for every arm: CUB (default class-level majority vote), frozen CLIP ViT-B-16 features,
+# `alignment: clip` (`human` only works with `dataset` concepts), score generation, a dense head,
+# sequential training.
+#
+# Concept count: K = 93 in every arm. The default CUB vote (`majority_vote: mean`,
+# `min_class_count: 10`) keeps 93 of the 312 attributes (docs/data.md; run 44c4f57329 in
+# results/cub_koh2020.jsonl). So K = 93 is the largest K that every arm reaches, and the `dataset`
+# arm keeps the full annotated vocabulary: `select` is a no-op there (it returns the set unchanged
+# when it has <= k concepts). In the `sae` arm, `select` picks 93 of the live latents.
+#
+# `text: readable` (issue #79): CLIP reads `curved (up or down) bill shape`, not the key
+# `has_bill_shape::curved_(up_or_down)`. Concept names, and so annotation matching, stay unchanged.
+#
+# Known gaps:
+#   - `select` acts only on the `sae` arm (submodular: coverage + class-discriminability). The
+#     `dataset` arm is not selected, so the `sae` arm gets a selection step that the `dataset` arm lacks.
+#   - An arm with fewer than 93 candidates trains on fewer concepts. Check `n_concepts` (and
+#     `concept_trace`) in every result row; raise `n_latents` if the `sae` arm falls short.
+#   - `leakage` intervention metrics (#89): with continuous (`clip`) targets, `leakage` intervenes with
+#     the alignment targets only when some concept has no annotation. All `dataset` concepts are
+#     annotated, so that arm reports no `intervention.*` metrics; the `sae` arm does. Compare `probe.*`.
+#   - No `concepts` evaluator: it reports nothing for a continuous concept layer (`alignment: clip`).
+#   - CLIP text template `{}` (backbone default, as in cub_human): CLIP reads the bare phrase, not e.g.
+#     `a photo of a bird with {}`. The template changes only text embeddings, not the feature cache.
+name: cub_clip
+dataset: {name: cub, root: data/CUB_200_2011}
+backbone: {name: clip, model: ViT-B-16, pretrained: openai}
+stages:
+  discovery: {name: dataset, text: readable}
+  filtering: [{name: select, k: 93, method: submodular}]
+  generation: {name: scores}
+  alignment: {name: clip}
+  predictor: {name: dense}
+  training: {name: sequential}
+evaluation:
+  - {name: shift}
+  - {name: leakage}
+paths: {cache: .cache, runs: runs/cub_discovery, results: results/cub_discovery.jsonl}
