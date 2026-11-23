@@ -1,0 +1,1080 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CBM Data Study</title>
+<style>
+  :root {
+    --bg: #fbfaf7; --fg: #1d1d1b; --muted: #5d5b55; --line: #e2dfd7;
+    --card: #ffffff; --accent: #2f5d8a; --accent-bg: #eaf1f8;
+    --warn: #8a5a12; --warn-bg: #fbf1df; --ok: #2c6b3f; --ok-bg: #e6f2ea;
+    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a;
+    --grid: #e1e0d9; --axis: #c3c2b7; --tick: #898781;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #161614; --fg: #e9e7e1; --muted: #a29f97; --line: #34332f;
+      --card: #1f1f1c; --accent: #8db7e0; --accent-bg: #1d2a37;
+      --warn: #e5b46a; --warn-bg: #33281a; --ok: #8fd0a2; --ok-bg: #1b2d21;
+      --s1: #3987e5; --s2: #d95926; --s3: #199e70;
+      --grid: #2c2c2a; --axis: #45443f; --tick: #898781;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #161614; --fg: #e9e7e1; --muted: #a29f97; --line: #34332f;
+    --card: #1f1f1c; --accent: #8db7e0; --accent-bg: #1d2a37;
+    --warn: #e5b46a; --warn-bg: #33281a; --ok: #8fd0a2; --ok-bg: #1b2d21;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70;
+    --grid: #2c2c2a; --axis: #45443f; --tick: #898781;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  main { max-width: 820px; margin: 0 auto; padding: 40px 16px 80px; }
+  h1 { font-size: 1.9rem; line-height: 1.25; margin: 0 0 .4rem; }
+  h2 { font-size: 1.35rem; margin: 2.6rem 0 .6rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+  h3 { font-size: 1.05rem; margin: 1.6rem 0 .4rem; }
+  p, li { max-width: 72ch; }
+  .lede { color: var(--muted); margin: 0 0 1.4rem; }
+  nav { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; }
+  nav ol { margin: 0; padding-left: 1.2rem; }
+  a { color: var(--accent); }
+  code { font: .88em ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--accent-bg); padding: 1px 5px; border-radius: 4px; }
+  .table-wrap { overflow-x: auto; margin: .8rem 0; }
+  table { border-collapse: collapse; width: 100%; font-size: .93rem; background: var(--card); }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border: 1px solid var(--line); }
+  th { background: var(--accent-bg); font-weight: 600; }
+  .note { border-left: 4px solid var(--accent); background: var(--accent-bg); padding: 10px 14px; border-radius: 0 6px 6px 0; margin: 1rem 0; }
+  .warn { border-left-color: var(--warn); background: var(--warn-bg); }
+  .ok { border-left-color: var(--ok); background: var(--ok-bg); }
+  .tag { display: inline-block; font-size: .78rem; padding: 0 7px; border-radius: 10px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+  footer { margin-top: 3rem; color: var(--muted); font-size: .9rem; }
+
+  /* figures */
+  figure { margin: 1.4rem 0; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  figcaption { color: var(--muted); font-size: .9rem; margin-top: .6rem; }
+  figcaption strong { color: var(--fg); }
+  .fig-title { font-weight: 600; margin: 0 0 .2rem; }
+  .fig-sub { color: var(--muted); font-size: .9rem; margin: 0 0 .6rem; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: .85rem; color: var(--muted); margin-bottom: 4px; }
+  .legend:empty { display: none; }
+  .lg { display: inline-flex; align-items: center; gap: 6px; }
+  .sw { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  .sw.line { width: 14px; height: 2px; border-radius: 1px; }
+  .plot { width: 100%; }
+  .plot svg { display: block; overflow: visible; }
+  .tick { fill: var(--tick); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .cat { fill: var(--muted); font-size: 12px; }
+  .val { fill: var(--fg); font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .axis-label { fill: var(--muted); font-size: 11.5px; }
+  .bar rect { outline: none; cursor: default; }
+  .bar:hover path, .bar:focus-within path { opacity: .75; }
+  .bar:focus-within path { stroke: var(--fg); stroke-width: 1.5; }
+  .multiples { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+  details.data { margin-top: .5rem; font-size: .88rem; }
+  details.data summary { cursor: pointer; color: var(--accent); }
+  details.data table { margin-top: .5rem; }
+  td.num { font-variant-numeric: tabular-nums; text-align: right; }
+  .badge { display: inline-block; font-size: .75rem; font-weight: 600; letter-spacing: .02em; text-transform: uppercase;
+           padding: 1px 8px; border-radius: 10px; background: var(--warn-bg); color: var(--warn); margin-left: 6px; vertical-align: 2px; }
+  #tip { position: fixed; pointer-events: none; z-index: 10; background: var(--card); color: var(--fg);
+         border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; font-size: .85rem;
+         box-shadow: 0 4px 14px rgba(0,0,0,.12); opacity: 0; transition: opacity .1s; max-width: 240px; }
+  #tip.on { opacity: 1; }
+  #tip strong { font-size: 1rem; font-variant-numeric: tabular-nums; }
+  .tip-row { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+  .tip-key { width: 12px; height: 2px; border-radius: 1px; flex: none; }
+
+  /* diagrams */
+  .confound { display: grid; grid-template-columns: 1fr 2.2fr 1fr; gap: 12px; align-items: center; }
+  .endbox { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--bg); text-align: center; }
+  .endbox b { display: block; }
+  .endbox small { color: var(--muted); }
+  .changes { display: grid; gap: 6px; position: relative; }
+  .chg { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 7px 10px;
+         border: 1px solid var(--line); border-radius: 6px; background: var(--bg); font-size: .9rem; }
+  .chg small { display: block; color: var(--muted); }
+  .pill { flex: none; font-size: .78rem; font-weight: 600; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
+  .pill.yes { background: var(--ok-bg); color: var(--ok); }
+  .pill.no { background: var(--warn-bg); color: var(--warn); }
+  .pill.unk { background: var(--accent-bg); color: var(--accent); }
+  .arrow { color: var(--muted); font-size: 1.4rem; text-align: center; }
+  @media (max-width: 640px) {
+    .confound { grid-template-columns: 1fr; }
+  }
+  .flow { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; counter-reset: stage; }
+  .stage { border: 1px solid var(--line); border-radius: 8px; background: var(--bg); padding: 10px; }
+  .stage h4 { margin: 0 0 6px; font-size: .92rem; }
+  .stage h4::before { counter-increment: stage; content: counter(stage); display: inline-grid; place-items: center;
+                      width: 20px; height: 20px; margin-right: 6px; border-radius: 50%; background: var(--accent-bg);
+                      color: var(--accent); font-size: .75rem; }
+  .stage ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; }
+  .stage li { font-size: .83rem; line-height: 1.35; }
+  .stage .tag { margin-left: 2px; font-size: .7rem; }
+  .tag.new { border-color: var(--s2); color: var(--fg); }
+  .tag.has { border-color: var(--s1); color: var(--fg); }
+
+  /* stat tiles */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin: 1rem 0; }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+  .stat .label { color: var(--muted); font-size: .82rem; line-height: 1.35; }
+  .stat .value { font-size: 1.6rem; font-weight: 600; line-height: 1.2; margin: 2px 0; }
+  .stat .stat-note { color: var(--muted); font-size: .76rem; }
+
+  /* architecture */
+  .arch { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; gap: 8px; align-items: stretch; }
+  .node { border: 1px solid var(--line); border-radius: 8px; background: var(--bg); padding: 10px 12px; font-size: .86rem; }
+  .node h4 { margin: 0 0 4px; font-size: .9rem; }
+  .node .where { display: inline-block; font-size: .72rem; font-weight: 600; text-transform: uppercase; letter-spacing: .03em;
+                 color: var(--muted); margin-bottom: 4px; }
+  .node ul { margin: 4px 0 0; padding-left: 1.1rem; }
+  .node li { margin: 1px 0; }
+  .node.remote { border-style: solid; border-color: var(--s1); }
+  .node.local { border-color: var(--s3); }
+  .node.repo { border-color: var(--s2); }
+  .link { display: grid; place-items: center; color: var(--muted); font-size: .75rem; text-align: center; min-width: 70px; }
+  .link span { display: block; font-size: 1.3rem; line-height: 1; color: var(--fg); }
+  .arch-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+  @media (max-width: 760px) {
+    .arch, .arch-row2 { grid-template-columns: 1fr; }
+    .link span { transform: rotate(90deg); }
+  }
+
+  /* annotation mockup */
+  .mock { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--bg); }
+  .mock-top { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; padding: 10px 14px;
+              border-bottom: 1px solid var(--line); background: var(--card); font-size: .85rem; }
+  .mock-top b { font-size: .95rem; }
+  .mock-top .spacer { flex: 1; }
+  .meter { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+  .meter .track { width: 90px; height: 6px; border-radius: 3px; background: var(--grid); overflow: hidden; }
+  .meter .fill { height: 100%; background: var(--s1); border-radius: 3px; }
+  .mock-body { display: grid; grid-template-columns: 1fr 250px; }
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 14px; align-content: start; }
+  .tile { position: relative; border: 2px solid var(--line); border-radius: 8px; background: var(--card); padding: 0;
+          cursor: pointer; font: inherit; color: inherit; text-align: left; overflow: hidden; }
+  .tile:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .tile svg { display: block; width: 100%; height: auto; aspect-ratio: 1; }
+  .tile .meta { display: flex; justify-content: space-between; gap: 4px; padding: 4px 6px; font-size: .7rem; color: var(--muted);
+                font-variant-numeric: tabular-nums; }
+  .tile .chip { position: absolute; top: 5px; right: 5px; font-size: .68rem; font-weight: 600; padding: 1px 6px; border-radius: 8px;
+                background: var(--card); color: var(--fg); border: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+  .tile .state { position: absolute; left: 5px; bottom: 30px; font-size: .7rem; font-weight: 600; padding: 1px 7px; border-radius: 8px;
+                 background: var(--card); border: 1px solid var(--line); display: none; }
+  .tile[data-s="present"] { border-color: var(--s1); }
+  .tile[data-s="absent"] { border-color: var(--s2); }
+  .tile[data-s="hidden"] { border-color: var(--tick); }
+  .tile[data-s="unsure"] { border-color: var(--s3); }
+  .tile:not([data-s=""]) .state { display: block; }
+  .side { border-left: 1px solid var(--line); padding: 14px; font-size: .85rem; display: grid; gap: 12px; align-content: start;
+          background: var(--card); }
+  .side h4 { margin: 0 0 4px; font-size: .9rem; }
+  .side p { margin: 0; }
+  .keys { display: grid; grid-template-columns: auto 1fr; gap: 3px 8px; align-items: center; }
+  kbd { font: .75rem ui-monospace, Menlo, monospace; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px;
+        padding: 0 5px; background: var(--bg); color: var(--fg); text-align: center; }
+  .counts { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; font-variant-numeric: tabular-nums; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+  .btn { font: inherit; font-size: .85rem; font-weight: 600; padding: 7px 12px; border-radius: 6px; border: 1px solid var(--line);
+         background: var(--bg); color: var(--fg); cursor: pointer; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--card); }
+  .toast { font-size: .8rem; color: var(--ok); min-height: 1.2em; }
+  @media (max-width: 760px) {
+    .mock-body { grid-template-columns: 1fr; }
+    .side { border-left: 0; border-top: 1px solid var(--line); }
+    .tiles { grid-template-columns: repeat(3, 1fr); }
+  }
+  @media (max-width: 460px) { .tiles { grid-template-columns: repeat(2, 1fr); } }
+  pre { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; overflow-x: auto;
+        font: .8rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>How much does the data shape a CBM?</h1>
+<p class="lede">Notes on Liu et al., <em>Rounded or Streamlined Head? Bridging Concept Bottleneck Models and
+Attribute-Described Object Parts</em> (CVPR 2026), how it maps onto CBM-Design-Evaluation, and a plan for a
+paper on the effect of data on concept bottleneck models. Written 2026-10-19.</p>
+
+<nav>
+  <ol>
+    <li><a href="#paper">What the paper does</a></li>
+    <li><a href="#feedback">Feedback: what it does and does not show</a></li>
+    <li><a href="#repo">What it means for this codebase</a></li>
+    <li><a href="#framing">Choosing a paper: improve the data, or measure its effect?</a></li>
+    <li><a href="#study">Study design</a></li>
+    <li><a href="#roadmap">Roadmap</a></li>
+    <li><a href="#annotate">An annotation platform that fits on a laptop</a></li>
+    <li><a href="#risks">Risks and threats to validity</a></li>
+    <li><a href="#refs">Related work to read</a></li>
+  </ol>
+</nav>
+
+<h2 id="paper">1. What the paper does</h2>
+<p>The paper names two failure modes of CBMs that score concepts with a vision–language model (CLIP, DINO):</p>
+<ul>
+  <li><strong>Semantic inconsistency.</strong> A part–attribute concept is scored in the wrong place on the
+    object, e.g. a head attribute lights up the body.</li>
+  <li><strong>Object inconsistency.</strong> An object-agnostic concept fires on the wrong object, e.g.
+    "head: streamlined front profile" activates on a person standing next to the fish.</li>
+</ul>
+<p>Their model, OA-CBM, addresses these with three ingredients:</p>
+<ol>
+  <li><strong>Part–attribute concepts.</strong> An LLM first lists each class's parts, then writes attributes for
+    each part, e.g. "head: tubular nostrils atop the bill". Near-duplicates above 0.9 similarity are removed
+    (SemHash). The top-K concepts are then kept by mutual information between VLM scores and LLM caption labels.</li>
+  <li><strong>Two grounding datasets.</strong> PartAttrCUB is built on the PartCUB-70 masks, with 8 parts:
+    head, eye, beak, neck, body, wing, leg and tail. PartAttrImageNet is the second. Within each part, species
+    that look alike are merged into clusters, and each cluster gets 3–5 attributes.</li>
+  <li><strong>Two learned modules.</strong> <em>Cost aggregation</em> (CA, in the style of CAT-Seg, trained with
+    mask supervision) reduces the wrong-place problem. <em>Hierarchical clustering</em> (HC) builds a foreground
+    object mask that is multiplied into the concept maps before pooling. The CLIP text encoder is also replaced by
+    Llama3 (LLM2CLIP).</li>
+</ol>
+<p>They also propose an evaluation task, <em>Open Concept Grounding</em>, with three protocols: Oracle-Obj (the
+true object mask and class are given), Oracle-All (only the true object mask is given) and Pred-All (nothing is
+given).</p>
+
+<h2 id="feedback">2. Feedback: what it does and does not show</h2>
+<p>The core problem is that the paper changes five things at once between a baseline VLM-CBM and OA-CBM, but
+ablates only two of them.</p>
+<figure>
+  <p class="fig-title">Five things change at once; two are ablated</p>
+  <div class="confound">
+    <div class="endbox"><b>Baseline VLM-CBM</b><small>e.g. LaBo, SALF-CBM: CLIP text + image encoder, object-level LLM concepts</small></div>
+    <div class="changes">
+      <div class="chg"><span>Concept format<small>object-level → part–attribute</small></span><span class="pill no">✗ not ablated</span></div>
+      <div class="chg"><span>Grounding training data<small>+ PartAttrCUB / PartAttrImageNet masks</small></span><span class="pill no">✗ entangled with CA</span></div>
+      <div class="chg"><span>Text encoder<small>CLIP → Llama3 (LLM2CLIP)</small></span><span class="pill unk">? unclear (suppl. Table 10)</span></div>
+      <div class="chg"><span>Cost aggregation (CA)<small>Swin + concept transformer on the cost volume</small></span><span class="pill yes">✓ ablated (Table 7)</span></div>
+      <div class="chg"><span>Object mask (HC)<small>hierarchical clustering, multiplied into concept maps</small></span><span class="pill yes">✓ ablated (Tables 1, 7)</span></div>
+    </div>
+    <div class="endbox"><b>OA-CBM</b><small>Liu et al., CVPR 2026</small></div>
+  </div>
+  <figcaption><strong>Figure 1.</strong> What differs between the baselines and OA-CBM, and whether the paper
+    isolates each change. The data-related changes, the first two rows, are exactly the ones without an ablation.</figcaption>
+</figure>
+<div class="table-wrap">
+<table>
+  <tr><th>Claim</th><th>Evidence</th><th>Assessment</th></tr>
+  <tr><td>Finer-grained annotations drive the grounding gains ("thanks to our efforts on finer-grained annotations")</td>
+      <td>On PartAttrCUB, Pred-All h-IoU rises from 4.4 (best baseline) to 20.8</td>
+      <td><span class="tag">not isolated</span> No ablation keeps the model fixed and changes only the concept
+        format or the annotations. CA is trained on the new dataset, so dataset and module are entangled, and the
+        text-encoder swap is a third confound.</td></tr>
+  <tr><td>Object masking matters</td>
+      <td>Under Pred-All on PartAttrCUB, adding the object mask lifts h-IoU from 6.6 to 20.8</td>
+      <td><span class="tag">well isolated</span> The cleanest result in the paper (Table 1).</td></tr>
+  <tr><td>Better grounding gives better patch-level classification</td>
+      <td>With CA, CUB patch-token accuracy rises from 33.8 to 63.2 (Table 7)</td>
+      <td><span class="tag">plausible</span> But HC without CA scores 0.01% on CUB and 0.1% on FOOD, which looks
+        like a collapsed training run rather than a real result.</td></tr>
+  <tr><td>Patch-based scoring is less accurate than CLS-based</td>
+      <td>CUB: 80.7 (CLS token) vs 63.3 (patch token)</td>
+      <td><span class="tag">consistent</span> The same interpretability vs accuracy trade-off appears in this
+        repo's SEG-MIL work.</td></tr>
+</table>
+</div>
+
+<figure class="chart" id="fig-protocol">
+  <p class="fig-title">Grounding collapses without an object mask once the oracle is removed</p>
+  <p class="fig-sub">Concept grounding on PartAttrCUB, h-IoU (%) by evaluation protocol. Source: paper Table 1.</p>
+  <div class="legend"></div>
+  <div class="plot"></div>
+  <details class="data"><summary>Show data table</summary><div class="table-wrap"><table></table></div></details>
+  <figcaption><strong>Figure 2.</strong> With oracle object masks, OA-CBM with and without its own object mask
+    scores the same. Under Pred-All, where nothing is given, the object mask is worth +14.2 h-IoU. SALF-CBM is the
+    strongest baseline under Pred-All.</figcaption>
+</figure>
+
+<figure class="chart" id="fig-ablation">
+  <p class="fig-title">Cost aggregation drives accuracy; the object mask drives grounding</p>
+  <p class="fig-sub">Paper Table 7, OA-CBM with each module switched on or off.</p>
+  <div class="multiples">
+    <div><p class="fig-sub"><strong>CUB-200 accuracy, patch token (%)</strong></p><div class="plot" data-k="0"></div></div>
+    <div><p class="fig-sub"><strong>PartAttrCUB grounding, Pred-All h-IoU (%)</strong></p><div class="plot" data-k="1"></div></div>
+  </div>
+  <details class="data"><summary>Show data table</summary><div class="table-wrap"><table></table></div></details>
+  <figcaption><strong>Figure 3.</strong> Adding CA lifts accuracy from 33.8 to 63.2%; adding HC on top lifts
+    grounding from 6.6 to 20.8 h-IoU. HC alone gives 0.01% accuracy (0.1% on FOOD-101), which looks like a
+    collapsed training run rather than a real effect.</figcaption>
+</figure>
+
+<figure class="chart" id="fig-tokens">
+  <p class="fig-title">Grounded (patch-based) scoring costs accuracy</p>
+  <p class="fig-sub">CUB-200 top-1 accuracy (%) for three ways of computing concept scores. Source: paper Tables 4–6.</p>
+  <div class="legend"></div>
+  <div class="plot"></div>
+  <details class="data"><summary>Show data table</summary><div class="table-wrap"><table></table></div></details>
+  <figcaption><strong>Figure 4.</strong> Every method loses accuracy when concepts are scored from patches instead
+    of the CLS token, and Labo collapses to 1.7%. The patch-guided score
+    (<code>S_global · sigmoid(S_patch)</code>) recovers most of the gap. This is the same trade-off this repo
+    measures with SEG-MIL.</figcaption>
+</figure>
+<div class="note warn">
+  <strong>Open questions for the authors' setup.</strong>
+  <ul>
+    <li>Neither the paper nor the supplement says whether the PartCUB-70 images used to train CA/HC overlap the
+      CUB-200 test split used for classification. Check this before comparing numbers.</li>
+    <li>PartAttrCUB labels are assigned per cluster of species, not per image. "Data quality" here means a better
+      vocabulary plus part masks; the per-image correctness of labels is not addressed.</li>
+  </ul>
+</div>
+<div class="note ok">
+  <strong>The takeaway for us.</strong> The paper suggests that data and concept design matter a lot, but its
+  ablations cannot separate data from modules. That separation is exactly what a controlled design study like
+  this repo can provide, and it is the gap a paper could fill.
+</div>
+
+<h2 id="repo">3. What it means for this codebase</h2>
+<h3>What the CUB loader currently discards</h3>
+<ul>
+  <li><strong>Annotator certainty.</strong> CUB records a certainty for every label (2 = guessing, 3 = probably,
+    4 = definitely). The loader uses only "1 = not visible", and only during majority voting.</li>
+  <li><strong>Per-image labels.</strong> With <code>class_level_concepts=True</code>, every image gets its
+    class's majority-voted vector.</li>
+  <li><strong>Part visibility.</strong> The concept loss trains on positives whose part is hidden.</li>
+  <li><strong>A coarse attribute-to-part mapping.</strong> <code>malar</code>, <code>eyebrow</code>,
+    <code>eyeline</code> and <code>masked</code> all map to crown/forehead
+    (<a href="https://github.com/mel-oezkan/CBM-Design-Evaluation/issues/1">issue #1</a>).</li>
+</ul>
+
+<h3>Proposed modules, ranked by value per effort</h3>
+<div class="table-wrap">
+<table>
+  <tr><th>#</th><th>Module</th><th>Where it goes</th><th>Effort</th></tr>
+  <tr><td>1</td><td><strong>Part-aware localization scoring.</strong> Part evaluators currently score only
+    concepts whose names match a dataset concept. Discovery would record <code>meta["part"]</code>, and the
+    evaluators would gain a kwarg <code>match: name | part</code>, with <code>name</code> as the default.</td>
+    <td><code>evaluation/parts.py</code>, <code>evaluation/localization.py</code></td><td>small</td></tr>
+  <tr><td>2</td><td><strong><code>part_llm</code> discovery.</strong> The paper's two-step prompt (parts, then
+    attributes per part). A <code>parts:</code> kwarg fixes the 8 CUB segmentation groups.</td>
+    <td><code>DISCOVERY</code></td><td>small</td></tr>
+  <tr><td>3</td><td><strong>Object masking through <code>Bag.mask</code>.</strong> A patch instance source with a
+    kwarg <code>object: none | oracle | predicted</code>. <code>oracle</code> uses the union of the CUB70 part
+    masks; <code>predicted</code> uses Grounding DINO + SAM prompted with "bird". Every existing pooling path then
+    gets object consistency for free.</td>
+    <td><code>INSTANCES</code></td><td>medium</td></tr>
+  <tr><td>4</td><td><strong>Data-quality kwargs on CUB</strong> (defaults keep current behaviour):
+    <code>label_source: majority | image | certainty</code>, a visibility mask and a <code>label_noise</code>
+    rate.</td>
+    <td><code>data/cub.py</code>, plus a training variant overriding <code>_concept_loss</code></td><td>medium</td></tr>
+  <tr><td>5</td><td><strong>Data audits.</strong> A <code>cbm-eval audit</code> command producing a per-concept
+    table: label agreement, visibility, learnability (probe AUC), signal inside vs outside the part, redundancy,
+    label-noise flags.</td>
+    <td>New family; needs a design issue</td><td>medium</td></tr>
+  <tr><td>6</td><td><strong><code>slices</code> evaluator.</strong> Accuracy split into bins by data quality:
+    part visible or hidden, annotator certain or guessing, label agrees with the class label or not.</td>
+    <td><code>EVALUATION</code></td><td>small</td></tr>
+  <tr><td>—</td><td>The CA module, the Llama3 text encoder and the patch-guided score.</td>
+    <td>Beyond what the stages can express today; design issue first</td><td>large</td></tr>
+</table>
+</div>
+
+<h2 id="framing">4. Choosing a paper: improve the data, or measure its effect?</h2>
+<div class="table-wrap">
+<table>
+  <tr><th></th><th>A. Effect of data (measurement study)</th><th>B. Improving the datasets (method or dataset paper)</th></tr>
+  <tr><td>Core question</td><td>Which properties of the training data change what a CBM learns, and by how much?</td>
+      <td>Does a cleaned or relabelled dataset give better CBMs?</td></tr>
+  <tr><td>Contribution</td><td>Controlled effect sizes for each data factor, a public grid of results and the audit toolkit</td>
+      <td>A new or cleaned dataset (e.g. a re-annotated CUB) plus evidence that it helps</td></tr>
+  <tr><td>Fit with the repo</td><td><strong>Very high.</strong> The repo already exists to vary one factor at a time,
+      across seeds, with a mixed-effects analysis.</td>
+      <td>Medium. Needs annotation work, human or VLM, and a release.</td></tr>
+  <tr><td>Main risk</td><td>Findings that are "obvious" unless the effect sizes or interactions are surprising</td>
+      <td>Annotation cost; reviewers asking whether the gains come from the data or from the cleaning model</td></tr>
+  <tr><td>Possible venues</td><td>Main-track ML/CV conferences (analysis papers), TMLR</td>
+      <td>Datasets &amp; benchmarks tracks</td></tr>
+</table>
+</div>
+<div class="note">
+  <strong>Recommendation: start with A, and let it lead into B.</strong> Measure first: which data levers move
+  accuracy, intervention gains, leakage and localization? Then fix only the most damaging lever and show the gain.
+  That gives the paper a story ("measure, then fix") and keeps the cleaning step honest, because it is justified by
+  the measurements. A working title: <em>"It's the Data: A Controlled Study of How Annotations Shape Concept
+  Bottleneck Models."</em>
+</div>
+
+<h2 id="study">5. Study design</h2>
+<h3>Research questions</h3>
+<ol>
+  <li><strong>RQ1, label quality.</strong> How do concept-label noise, granularity (per image or per class) and
+    annotator certainty affect task accuracy, concept accuracy and intervention gains?</li>
+  <li><strong>RQ2, concept vocabulary.</strong> At a fixed model, does the concept format matter: human
+    attributes, object-level LLM concepts, part–attribute LLM concepts or SAE concepts? This is the ablation the
+    OA-CBM paper does not run.</li>
+  <li><strong>RQ3, spatial supervision.</strong> What do keypoints, part masks or object masks add to grounding,
+    and does better grounding transfer to accuracy or robustness?</li>
+  <li><strong>RQ4, annotation budget.</strong> How many concept-labelled images are needed? Where does the curve
+    flatten?</li>
+  <li><strong>RQ5, interactions.</strong> Does the backbone or training scheme (sequential, independent, joint)
+    change how sensitive a CBM is to data quality?</li>
+</ol>
+
+<h3>Hypotheses (to test, not claims)</h3>
+<ul>
+  <li><strong>H1.</strong> Concept-label noise hurts intervention gains more than task accuracy: the head learns
+    to route around unreliable concepts, which shows up as more leakage.</li>
+  <li><strong>H2.</strong> Per-class labels raise measured concept accuracy but lower localization, because they
+    teach "species identity" rather than "visible attribute".</li>
+  <li><strong>H3.</strong> Part–attribute vocabularies improve localization clearly but accuracy only a little.</li>
+  <li><strong>H4.</strong> Object masking lowers reliance on the background, raising worst-group accuracy on
+    Waterbirds.</li>
+</ul>
+
+<h3>Factors (independent variables)</h3>
+<figure>
+  <p class="fig-title">Where each data lever plugs into the pipeline</p>
+  <div class="legend"><span class="lg"><span class="tag has">exists</span> already a config switch</span>
+    <span class="lg"><span class="tag new">new</span> needs a kwarg or variant</span></div>
+  <div class="flow">
+    <div class="stage"><h4>Dataset</h4><ul>
+      <li>Label granularity <span class="tag has">exists</span></li>
+      <li>Injected label noise <span class="tag new">new</span></li>
+      <li>Annotator certainty <span class="tag new">new</span></li>
+      <li>Annotation budget <span class="tag new">new</span></li></ul></div>
+    <div class="stage"><h4>Discovery</h4><ul>
+      <li>Vocabulary source: human, llm, vlm, sae <span class="tag has">exists</span></li>
+      <li>Part–attribute (<code>part_llm</code>) <span class="tag new">new</span></li></ul></div>
+    <div class="stage"><h4>Filtering</h4><ul>
+      <li>Dedupe, selection <span class="tag has">exists</span></li>
+      <li>MI / audit-score filter <span class="tag new">new</span></li></ul></div>
+    <div class="stage"><h4>Instances</h4><ul>
+      <li>Patches, SAM segments <span class="tag has">exists</span></li>
+      <li>Object mask: oracle or predicted <span class="tag new">new</span></li></ul></div>
+    <div class="stage"><h4>Training</h4><ul>
+      <li>Sequential / independent / joint <span class="tag has">exists</span></li>
+      <li>Visibility-masked concept loss <span class="tag new">new</span></li></ul></div>
+    <div class="stage"><h4>Evaluation</h4><ul>
+      <li>Accuracy, leakage, shift, part IoU <span class="tag has">exists</span></li>
+      <li>Part-matched grounding, <code>slices</code> <span class="tag new">new</span></li></ul></div>
+  </div>
+  <figcaption><strong>Figure 5.</strong> Each data lever is one config key at one stage, so the study can vary one
+    lever while everything else stays fixed. The two "new" items under Evaluation come first: they are needed to
+    measure the rest.</figcaption>
+</figure>
+<div class="table-wrap">
+<table>
+  <tr><th>Factor</th><th>Levels</th><th>Status in repo</th></tr>
+  <tr><td>Label granularity</td><td>image / class (mean vote) / class (Koh vote)</td><td>exists: <code>class_level_concepts</code>, <code>majority_vote</code></td></tr>
+  <tr><td>Label noise (injected)</td><td>flip rate 0, 5, 10, 20, 40%</td><td>new kwarg (dataset)</td></tr>
+  <tr><td>Annotator certainty</td><td>ignore / drop guesses / weight by certainty</td><td>new kwarg (dataset)</td></tr>
+  <tr><td>Visibility masking</td><td>off / on</td><td>new (dataset field + training variant)</td></tr>
+  <tr><td>Concept vocabulary</td><td>human / <code>llm</code> / <code>part_llm</code> / <code>vlm</code> / <code>sae</code></td><td>mostly exists; <code>part_llm</code> is new</td></tr>
+  <tr><td>Vocabulary cleaning</td><td>none / dedupe / dedupe + selection</td><td>exists: <code>clip</code>, <code>select</code> filters</td></tr>
+  <tr><td>Object mask</td><td>none / predicted / oracle</td><td>new instance-source kwarg</td></tr>
+  <tr><td>Annotation budget</td><td>10, 25, 50, 100% of images with concept labels</td><td>new kwarg (dataset)</td></tr>
+  <tr><td>Backbone (interaction)</td><td><code>clip</code> / <code>dinov2</code></td><td>exists</td></tr>
+</table>
+</div>
+<p>Vary one factor at a time from a fixed anchor (e.g. <code>cub_human</code>), and add a small full grid only for
+the interactions you care about (RQ5). Use at least 3 seeds, and 5 for headline numbers.</p>
+
+<h3>Measures (dependent variables)</h3>
+<ul>
+  <li><strong>Accuracy:</strong> task accuracy, concept accuracy and F1 (<code>concepts</code>).</li>
+  <li><strong>Reliance on concepts:</strong> intervention curves, the soft–hard gap, and a probe for the spurious
+    attribute (<code>leakage</code>).</li>
+  <li><strong>Grounding:</strong> <code>part_iou</code>, <code>keypoint_distance</code>, <code>localization</code>,
+    matched by part once module 1 exists.</li>
+  <li><strong>Robustness:</strong> worst-group and effective robustness on Waterbirds / MetaShift (<code>shift</code>).</li>
+  <li><strong>Cost:</strong> annotation budget, so results can be read as Pareto frontiers.</li>
+</ul>
+<h3>Analysis</h3>
+<p>Use the existing mixed-effects models (<code>analysis.effects</code>) for each factor's effect with confidence
+intervals, Pareto frontiers of accuracy vs grounding vs annotation cost, and dose–response curves for noise and
+budget. Add the audit-vs-result join: does a concept's audit score (e.g. learnability) predict its grounding and
+its intervention value?</p>
+
+<h3>Figures the paper would need</h3>
+<ol>
+  <li>A dose–response plot: label-noise rate vs accuracy and intervention gain (the H1 test).</li>
+  <li>A forest plot of effect sizes for every data factor, one panel per metric.</li>
+  <li>A vocabulary × object-mask grid on CUB70: accuracy vs part IoU (the experiment OA-CBM does not run).</li>
+  <li>An annotation-budget curve with Pareto frontiers.</li>
+  <li>Qualitative concept maps for low- and high-quality concepts, taken from the audit.</li>
+</ol>
+<figure class="chart" id="fig-sketch">
+  <p class="fig-title">What planned figure 1 (H1 dose–response) would look like <span class="badge">Sketch · no data</span></p>
+  <p class="fig-sub">The shape H1 predicts, not a result. The curves are drawn by hand to show what the plot would
+    test; only the x-axis levels are the planned design.</p>
+  <div class="legend"></div>
+  <div class="plot"></div>
+  <figcaption><strong>Figure 6.</strong> If H1 holds, intervention gain falls much faster than task accuracy as
+    concept-label noise grows: the model keeps its accuracy by relying less on the concepts. If both curves fall
+    together, H1 is rejected. Either outcome is a finding.</figcaption>
+</figure>
+
+<h2 id="roadmap">6. Roadmap</h2>
+<div class="table-wrap">
+<table>
+  <tr><th>Phase</th><th>Work</th><th>Output</th></tr>
+  <tr><td>0</td><td>Part-aware evaluators (module 1); check the CUB70 mask coverage; decide the anchor</td><td>Grounding works for any vocabulary</td></tr>
+  <tr><td>1</td><td>Data-factor kwargs on CUB and the synthetic dataset (noise, certainty, visibility, budget), with tests</td><td>Every factor is a config switch</td></tr>
+  <tr><td>2</td><td><code>part_llm</code> discovery, object-mask instance source, <code>slices</code> evaluator</td><td>RQ2 and RQ3 can run</td></tr>
+  <tr><td>3</td><td>Pilot on the synthetic dataset, where the true effect of noise is known, to check the measurements</td><td>Confidence that the metrics respond as expected</td></tr>
+  <tr><td>4</td><td>Full sweeps on Modal; ablation configs under <code>configs/ablations/</code></td><td>Results JSONL</td></tr>
+  <tr><td>5</td><td>Audits plus the audit-vs-result analysis; optionally a cleaned CUB variant (framing B)</td><td>Figures and tables</td></tr>
+  <tr><td>6</td><td>Writing; release configs and results files</td><td>Paper draft</td></tr>
+</table>
+</div>
+
+<h2 id="annotate">7. An annotation platform that fits on a laptop</h2>
+<p>Annotation has a heavy part and a valuable part. The heavy part is the pixels: CUB alone is about 1.1 GB and
+ImageNet over 100 GB. The valuable part is the labels, which are tiny: one judgment is about 150 bytes. So the
+platform should keep pixels remote and send only what is on screen, while keeping labels local, small and
+versioned.</p>
+
+<div class="stats">
+  <div class="stat"><div class="label">Labels in a full CUB re-annotation</div><div class="value">3.7M</div>
+    <div class="stat-note">11,788 images × 312 attributes: not feasible by hand</div></div>
+  <div class="stat"><div class="label">Judgments per hour, grid verification</div><div class="value">~2,000</div>
+    <div class="stat-note">assumption (~1.8 s per tile); measure it in the pilot</div></div>
+  <div class="stat"><div class="label">Time for 5,000 targeted judgments</div><div class="value">~2.5 h</div>
+    <div class="stat-note">only the items the audit flags</div></div>
+  <div class="stat"><div class="label">Local disk for one 2,000-crop batch</div><div class="value">~30 MB</div>
+    <div class="stat-note">224 px WebP crops, ~15 KB each (estimate)</div></div>
+</div>
+
+<h3>Five design principles</h3>
+<ol>
+  <li><strong>Annotate only where it matters.</strong> Tasks come from the audits (§3): images where the probe
+    disagrees with the label, guessed labels, positives with a hidden part. Never the whole dataset.</li>
+  <li><strong>Verify instead of labelling from scratch.</strong> One attribute, many part crops per screen, with the
+    current label and the model's score shown. You only act on the tiles that are wrong. This is the fastest
+    task type there is.</li>
+  <li><strong>Pixels stay remote.</strong> Crops are cut on Modal from the volume that already holds CUB
+    (<code>cbm-koh2020</code>). They are downloaded per batch and deleted afterwards, or streamed through a cache
+    with a fixed size limit.</li>
+  <li><strong>Labels are local and immutable once released.</strong> SQLite while you work. When you are done, an
+    export to a JSONL snapshot with the content hash in its filename, committed to git.</li>
+  <li><strong>Measure the annotator too.</strong> Hidden gold items and repeated items give the self-agreement
+    and inter-annotator numbers that a data paper must report.</li>
+</ol>
+
+<figure>
+  <p class="fig-title">How the pieces fit together</p>
+  <div class="legend">
+    <span class="lg"><span class="sw" style="background: var(--s1)"></span>remote (Modal)</span>
+    <span class="lg"><span class="sw" style="background: var(--s3)"></span>your machine</span>
+    <span class="lg"><span class="sw" style="background: var(--s2)"></span>this repo</span>
+  </div>
+  <div class="arch">
+    <div class="node repo"><span class="where">Repo · step 1</span><h4>Task export</h4>
+      <ul><li>Run audits on Modal</li><li>Pick the top-N items by priority</li><li><code>tasks.jsonl</code>: image, part, attribute, current label, reason</li></ul></div>
+    <div class="link"><span>→</span>task list<br>(KB)</div>
+    <div class="node remote"><span class="where">Modal · step 2</span><h4>Crop service</h4>
+      <ul><li>Reads images and keypoints from the <code>cbm-koh2020</code> volume</li><li>Cuts a 224 px crop around the part</li><li>Batch job → zip, or a web endpoint with <code>requires_proxy_auth=True</code></li></ul></div>
+    <div class="link"><span>→</span>crops only<br>(~15 KB each)</div>
+    <div class="node local"><span class="where">Your machine · step 3</span><h4>Annotation app</h4>
+      <ul><li>Small FastAPI app + the page mocked up below</li><li>SQLite for labels (MBs)</li><li>Crop cache with a size cap, cleared after each batch</li></ul></div>
+  </div>
+  <div class="arch-row2">
+    <div class="node repo"><span class="where">Repo · step 4</span><h4>Label snapshot</h4>
+      <ul><li><code>labels/cub-relabel-&lt;sha8&gt;.jsonl</code>, never edited after export</li><li>Annotator id, certainty, task, timestamp and tool version on every row</li></ul></div>
+    <div class="node repo"><span class="where">Repo · step 5</span><h4>Back into experiments</h4>
+      <ul><li>CUB kwarg <code>relabel: &lt;snapshot&gt;</code>, default <code>None</code></li><li>File hash in <code>cache_key()</code></li><li>Ablation factor: original vs relabelled, run on Modal</li></ul></div>
+  </div>
+  <figcaption><strong>Figure 7.</strong> Only crops and a task list ever reach your machine, and only labels leave
+    it. The full images never do. The web endpoint is protected with a Modal proxy token, because web functions
+    are public by default and CUB images should not be served openly.</figcaption>
+</figure>
+
+<figure>
+  <p class="fig-title">Mockup: the grid verification screen <span class="badge">Mockup · placeholder drawings</span></p>
+  <p class="fig-sub">Interactive: click a tile, or focus it and press <kbd>1</kbd>–<kbd>4</kbd>. Arrow keys move
+    between tiles. The drawings stand in for real CUB crops of the bird's head.</p>
+  <div class="mock" id="mock">
+    <div class="mock-top">
+      <span><b>has_head_pattern::malar</b> · part: head</span>
+      <span class="meter"><span>batch <span id="mock-batch">3</span>/12</span><span class="track"><span class="fill" id="mock-prog" style="width: 25%"></span></span></span>
+      <span class="spacer"></span>
+      <span class="meter">cache 34 / 500 MB <span class="track"><span class="fill" style="width: 7%"></span></span></span>
+    </div>
+    <div class="mock-body">
+      <div class="tiles" id="mock-tiles"></div>
+      <div class="side">
+        <div><h4>Malar stripe</h4>
+          <p>A dark stripe from the base of the bill down the side of the throat, like a moustache. Mark
+            <em>not visible</em> when the side of the face is hidden or turned away.</p></div>
+        <div><h4>Why these images</h4>
+          <p>CUB says <em>present</em> (class-level majority vote), but the concept probe scores below 0.2. These
+            are candidates for label noise.</p></div>
+        <div><h4>Keys</h4>
+          <div class="keys">
+            <kbd>1</kbd><span><span class="dot" style="background: var(--s1)"></span>present</span>
+            <kbd>2</kbd><span><span class="dot" style="background: var(--s2)"></span>absent</span>
+            <kbd>3</kbd><span><span class="dot" style="background: var(--tick)"></span>not visible</span>
+            <kbd>4</kbd><span><span class="dot" style="background: var(--s3)"></span>unsure</span>
+            <kbd>0</kbd><span>clear</span>
+          </div></div>
+        <div><h4>This batch</h4><div class="counts" id="mock-counts"></div></div>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <button class="btn" id="mock-rest" type="button">Rest are present</button>
+          <button class="btn primary" id="mock-submit" type="button">Submit batch</button>
+        </div>
+        <div class="toast" id="mock-toast" role="status"></div>
+      </div>
+    </div>
+  </div>
+  <figcaption><strong>Figure 8.</strong> One attribute, twelve crops of the same part. Each tile shows the model's
+    score (top right) and the image id. "Rest are present" fills every untouched tile with the current label, so a
+    batch where most labels are right takes one click plus the fixes. Submitting writes one row per tile to SQLite.
+    In the real tool, about one tile in ten would be a hidden gold item.</figcaption>
+</figure>
+
+<figure class="chart" id="fig-storage">
+  <p class="fig-title">Local storage by approach <span class="badge">Estimates</span></p>
+  <p class="fig-sub">Megabytes on your machine for CUB. Rough sizes, not measured.</p>
+  <div class="plot"></div>
+  <details class="data"><summary>Show data table</summary><div class="table-wrap"><table></table></div></details>
+  <figcaption><strong>Figure 9.</strong> Keeping all of CUB locally costs about 1.1 GB; for ImageNet the same
+    approach costs over 100 GB. Batch download needs only what one session shows, and a streaming cache is capped at
+    whatever limit you set. The labels themselves stay in the low megabytes even after 100,000 judgments.</figcaption>
+</figure>
+
+<h3>Build it, or use an existing tool?</h3>
+<div class="table-wrap">
+<table>
+  <tr><th>Option</th><th>Where the images live</th><th>Grid verification</th><th>Mask / box correction</th><th>Effort</th></tr>
+  <tr><td><strong>Small custom app</strong> (recommended for labels)</td><td>Remote crops, batch or streamed</td>
+      <td>Built for it</td><td>No</td><td>A few hundred lines; you own the schema</td></tr>
+  <tr><td>Label Studio</td><td>Cloud bucket, served by URL</td><td>Awkward: one image per task</td>
+      <td>Yes</td><td>Self-hosted server; you need a bucket</td></tr>
+  <tr><td>CVAT</td><td>Cloud storage or uploads</td><td>No</td><td>Strong, with SAM-assisted masks</td>
+      <td>Heavy Docker stack</td></tr>
+  <tr><td>FiftyOne</td><td>Local by default</td><td>Good for browsing and finding problems</td>
+      <td>Limited</td><td>Easy, but needs the media locally</td></tr>
+</table>
+</div>
+<p>The recommendation: build the small app for attribute verification, which is most of the work and benefits
+most from a custom screen. Use CVAT only if you decide to correct part masks for the grounding evaluation. Check
+the current storage options of each tool before committing; this table is from memory.</p>
+
+<h3>How labels get back into experiments</h3>
+<p>One row per judgment, in the same terms as CUB's own certainty scale, so the loader can treat human and
+original labels the same way:</p>
+<pre>{"image_id": 1234, "part": "head", "attribute": "has_head_pattern::malar",
+ "label": "absent", "certainty": 4, "annotator": "a1", "task": "malar-probe-disagree",
+ "gold": false, "ts": "2026-10-20T14:03:11Z", "tool": "0.1.0"}</pre>
+<ul>
+  <li><strong>The dataset reads it through an opt-in kwarg:</strong>
+    <code>dataset: {name: cub, relabel: labels/cub-relabel-3f9a12c0.jsonl}</code>. The default, <code>None</code>,
+    keeps every existing result valid.</li>
+  <li><strong>The cache key includes the file's hash,</strong> not just its path, and the key is added to
+    <code>tests/test_cache_keys.py</code>. The run id only hashes the config, so an edited file under the same
+    path would otherwise silently reuse old results. Hence the immutable, hash-named snapshots.</li>
+  <li><strong>The effect of the relabelling is an ablation factor:</strong> original vs relabelled, everything else
+    fixed. That is framing B from §4 (improving the data), measured the same way as framing A.</li>
+  <li><strong>The task export</strong> (<code>cbm-eval annotate export</code>) is a new CLI command next to the
+    audits. Like the audit registry, it is worth a short design issue first.</li>
+</ul>
+
+<h3>Build plan</h3>
+<div class="table-wrap">
+<table>
+  <tr><th>Step</th><th>What</th><th>Done when</th></tr>
+  <tr><td>1. Pilot</td><td>Export 500 tasks for 3 attributes, crop them on Modal into a zip, build the grid page
+      with SQLite and export</td><td>You know your real judgments per hour and how often you mark "unsure"</td></tr>
+  <tr><td>2. Integration</td><td><code>relabel:</code> kwarg + cache key + test; a first ablation on Modal</td>
+      <td>Original vs relabelled shows up in the results file</td></tr>
+  <tr><td>3. Quality</td><td>Gold items, repeats, a second annotator on a 10% subset</td>
+      <td>Self-agreement and Cohen's κ are in the paper's table</td></tr>
+  <tr><td>4. Scale</td><td>Streaming crop endpoint with proxy auth and a capped cache; other datasets</td>
+      <td>An ImageNet-size dataset is annotatable without local copies</td></tr>
+</table>
+</div>
+
+<h2 id="risks">8. Risks and threats to validity</h2>
+<ul>
+  <li><strong>Reproducibility.</strong> Every data lever must be a new kwarg with the old behaviour as default.
+    Changing defaults in place silently mixes old and new results under the same run id.</li>
+  <li><strong>CUB peculiarities.</strong> Majority voting, the 112-concept filter and the 70-class mask subset may
+    not generalize. Repeat the key results on a second dataset (AwA2 or CelebA are open issues #33 and #32).</li>
+  <li><strong>Injected noise is not real noise.</strong> Uniform flips are easier than structured annotator
+    errors. Also report effects of the real certainty labels.</li>
+  <li><strong>LLM vocabularies drift.</strong> Cache discovery outputs (the repo's <code>JsonCache</code>) and
+    publish them, so the vocabulary is fixed across runs.</li>
+  <li><strong>Confounding by vocabulary size.</strong> Match the number of concepts K when comparing vocabularies.</li>
+  <li><strong>Train/test overlap</strong> between part-mask training data and the classification test split (the
+    open question about OA-CBM applies to us too).</li>
+</ul>
+
+<h2 id="refs">9. Related work to read</h2>
+<p>Verify every citation before using it; this list is from memory.</p>
+<ul>
+  <li>Koh et al., <em>Concept Bottleneck Models</em>, ICML 2020: the CUB setup and majority voting.</li>
+  <li>Oikarinen et al., <em>Label-free Concept Bottleneck Models</em>, ICLR 2023.</li>
+  <li>Yang et al., <em>Language in a Bottle (LaBo)</em>, CVPR 2023.</li>
+  <li>Srivastava et al., <em>VLG-CBM</em>, NeurIPS 2024: the NEC metric.</li>
+  <li>Benou &amp; Riklin Raviv, <em>SALF-CBM</em>, CVPR 2025; Xie et al., <em>DOT-CBM</em>, CVPR 2025.</li>
+  <li>Liu et al., <em>Rounded or Streamlined Head? (OA-CBM)</em>, CVPR 2026: the paper above.</li>
+  <li>Mahinpei et al., <em>Promises and Pitfalls of Black-Box Concept Learning Models</em>, 2021: leakage.</li>
+  <li>Margeloiu et al., <em>Do Concept Bottleneck Models Learn as Intended?</em>, 2021.</li>
+  <li>Havasi et al., <em>Addressing Leakage in Concept Bottleneck Models</em>, NeurIPS 2022.</li>
+  <li>Raman et al., <em>Do Concept Bottleneck Models Respect Localities?</em></li>
+  <li>Northcutt et al., <em>Confident Learning</em>, JAIR 2021: label-noise detection for the audits.</li>
+  <li><em>SUB: Benchmarking CBM Generalization via Synthetic Attribute Substitutions</em>, 2025 (arXiv 2507.23784).</li>
+</ul>
+
+<footer>Notes for the CBM-Design-Evaluation project. Paper PDFs are in <code>papers/</code>.</footer>
+</main>
+<div id="tip" role="status" aria-live="polite"></div>
+<script>
+(() => {
+  const NS = "http://www.w3.org/2000/svg";
+  const tip = document.getElementById("tip");
+  const fmt = v => (v > 0 && v < 0.1 ? v.toFixed(2) : v.toFixed(1));
+
+  function svgEl(tag, attrs, parent) {
+    const e = document.createElementNS(NS, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+
+  function showTip(target, value, series, color, category) {
+    tip.replaceChildren();
+    const v = document.createElement("strong");
+    v.textContent = value;
+    const row = document.createElement("div");
+    row.className = "tip-row";
+    const key = document.createElement("span");
+    key.className = "tip-key";
+    key.style.background = `var(${color})`;
+    const name = document.createElement("span");
+    name.textContent = series ? `${series} · ${category}` : category;
+    row.append(key, name);
+    tip.append(v, row);
+    tip.classList.add("on");
+    const r = target.getBoundingClientRect(), t = tip.getBoundingClientRect();
+    const left = Math.min(Math.max(8, r.left + r.width / 2 - t.width / 2), innerWidth - t.width - 8);
+    const top = Math.max(8, r.top + r.height * 0.35 - t.height - 8);
+    tip.style.left = left + "px";
+    tip.style.top = top + "px";
+  }
+  const hideTip = () => tip.classList.remove("on");
+  addEventListener("scroll", hideTip, { passive: true });
+
+  function legend(el, series, line) {
+    if (!el || series.length < 2) return;
+    for (const s of series) {
+      const item = document.createElement("span");
+      item.className = "lg";
+      const sw = document.createElement("span");
+      sw.className = line ? "sw line" : "sw";
+      sw.style.background = `var(${s.color})`;
+      item.append(sw, document.createTextNode(s.name));
+      el.append(item);
+    }
+  }
+
+  function dataTable(table, header, rows) {
+    const h = table.createTHead().insertRow();
+    for (const text of header) {
+      const th = document.createElement("th");
+      th.textContent = text;
+      h.append(th);
+    }
+    const body = table.createTBody();
+    for (const cells of rows) {
+      const tr = body.insertRow();
+      cells.forEach((c, i) => {
+        const td = tr.insertCell();
+        td.textContent = c;
+        if (i) td.className = "num";
+      });
+    }
+  }
+
+  function responsive(plot, draw) {
+    let lastW = 0;
+    new ResizeObserver(() => {
+      const w = plot.clientWidth;
+      if (w && w !== lastW) { lastW = w; draw(w); }
+    }).observe(plot);
+  }
+
+  // Grouped (or single-series) column chart. cfg: categories, series [{name, color, values}], max, ticks, label(si, ci)
+  function columns(plot, cfg) {
+    responsive(plot, W => {
+      plot.replaceChildren();
+      const H = cfg.height || 250, m = { t: 22, r: 6, b: 44, l: 34 };
+      const pw = W - m.l - m.r, ph = H - m.t - m.b;
+      const svg = svgEl("svg", { width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": cfg.title }, plot);
+      const y = v => m.t + ph - (v / cfg.max) * ph;
+      for (const t of cfg.ticks) {
+        svgEl("line", { x1: m.l, x2: W - m.r, y1: y(t), y2: y(t), style: `stroke: var(${t === 0 ? "--axis" : "--grid"})`,
+                        "stroke-width": 1, "shape-rendering": "crispEdges" }, svg);
+        svgEl("text", { x: m.l - 6, y: y(t) + 4, "text-anchor": "end", class: "tick" }, svg).textContent = t;
+      }
+      const n = cfg.series.length, gap = 2, band = pw / cfg.categories.length;
+      const bw = Math.max(4, Math.min(24, (band * 0.7 - gap * (n - 1)) / n));
+      const gw = n * bw + (n - 1) * gap, placed = [];
+      cfg.categories.forEach((cat, ci) => {
+        const cx = m.l + band * ci + band / 2, x0 = cx - gw / 2;
+        const label = svgEl("text", { x: cx, y: H - m.b + 18, "text-anchor": "middle", class: "cat" }, svg);
+        cat.split("\n").forEach((line, i) => {
+          svgEl("tspan", { x: cx, dy: i ? 14 : 0 }, label).textContent = line;
+        });
+        const catName = cat.replace("\n", " ");
+        cfg.series.forEach((s, si) => {
+          const v = s.values[ci], x = x0 + si * (bw + gap), y0 = y(0);
+          const yt = Math.min(y(v), y0 - 1), r = Math.min(4, bw / 2, y0 - yt);
+          const g = svgEl("g", { class: "bar" }, svg);
+          svgEl("path", { d: `M${x},${y0}V${yt + r}Q${x},${yt} ${x + r},${yt}H${x + bw - r}Q${x + bw},${yt} ${x + bw},${yt + r}V${y0}Z`,
+                          style: `fill: var(${s.color})` }, g);
+          const hit = svgEl("rect", { x: x - gap / 2, y: m.t, width: bw + gap, height: ph, fill: "transparent", tabindex: 0,
+                                      "aria-label": `${s.name ? s.name + ", " : ""}${catName}: ${fmt(v)}` }, g);
+          const on = () => showTip(hit, (cfg.fmt || fmt)(v) + (cfg.unit || ""), s.name, s.color, catName);
+          hit.addEventListener("pointerenter", on);
+          hit.addEventListener("focus", on);
+          hit.addEventListener("pointerleave", hideTip);
+          hit.addEventListener("blur", hideTip);
+          if (cfg.label && cfg.label(si, ci, bw)) {
+            const t = svgEl("text", { x: x + bw / 2, y: yt - 6, "text-anchor": "middle", class: "val" }, svg);
+            t.textContent = (cfg.fmt || fmt)(v);
+            const b = t.getBBox();  // drop a label that would collide with one already placed
+            if (placed.some(o => b.x < o.x + o.width && o.x < b.x + b.width && b.y < o.y + o.height && o.y < b.y + b.height)) t.remove();
+            else placed.push(b);
+          }
+        });
+      });
+    });
+  }
+
+  // Figure 2: grounding by protocol (paper Table 1, PartAttrCUB h-IoU)
+  {
+    const fig = document.getElementById("fig-protocol");
+    const cats = ["Oracle-Obj", "Oracle-All", "Pred-All"];
+    const series = [
+      { name: "SALF-CBM (best baseline, Pred-All)", color: "--s1", values: [23.5, 14.9, 4.4] },
+      { name: "OA-CBM without object mask", color: "--s2", values: [33.9, 24.7, 6.6] },
+      { name: "OA-CBM with object mask", color: "--s3", values: [33.9, 24.7, 20.8] },
+    ];
+    legend(fig.querySelector(".legend"), series);
+    columns(fig.querySelector(".plot"), { title: "PartAttrCUB h-IoU by protocol", categories: cats, series,
+      max: 40, ticks: [0, 10, 20, 30, 40], label: (si, ci) => si === 2 || (si === 1 && ci === 2) });
+    dataTable(fig.querySelector("table"), ["Protocol", ...series.map(s => s.name)],
+      cats.map((c, i) => [c, ...series.map(s => fmt(s.values[i]))]));
+  }
+
+  // Figure 3: module ablation (paper Table 7)
+  {
+    const fig = document.getElementById("fig-ablation");
+    const cats = ["Neither", "HC only", "CA only", "CA + HC"];
+    const acc = [33.8, 0.01, 63.2, 63.3], iou = [1.3, 0.6, 6.6, 20.8];
+    const [p0, p1] = fig.querySelectorAll(".plot");
+    columns(p0, { title: "CUB-200 accuracy by module", categories: cats, max: 80, ticks: [0, 20, 40, 60, 80],
+      series: [{ name: "", color: "--s1", values: acc }], label: () => true });
+    columns(p1, { title: "PartAttrCUB Pred-All h-IoU by module", categories: cats, max: 25, ticks: [0, 5, 10, 15, 20, 25],
+      series: [{ name: "", color: "--s1", values: iou }], label: () => true });
+    dataTable(fig.querySelector("table"), ["Modules", "CUB-200 accuracy (%)", "PartAttrCUB Pred-All h-IoU (%)"],
+      cats.map((c, i) => [c, fmt(acc[i]), fmt(iou[i])]));
+  }
+
+  // Figure 4: CLS vs patch vs patch-guided (paper Tables 4-6, CUB-200)
+  {
+    const fig = document.getElementById("fig-tokens");
+    const cats = ["Labo", "SC-CBM", "DOT-CBM", "OA-CBM"];
+    const series = [
+      { name: "CLS token", color: "--s1", values: [73.5, 78.3, 77.3, 80.7] },
+      { name: "Patch token", color: "--s2", values: [1.7, 36.6, 58.6, 63.3] },
+      { name: "Patch-guided", color: "--s3", values: [71.7, 69.2, 74.5, 80.6] },
+    ];
+    legend(fig.querySelector(".legend"), series);
+    columns(fig.querySelector(".plot"), { title: "CUB-200 accuracy by scoring mode", categories: cats, series,
+      max: 100, ticks: [0, 25, 50, 75, 100], label: (si, ci, bw) => (ci === 0 && si === 1) || (bw >= 20 && ci === 3) });
+    dataTable(fig.querySelector("table"), ["Method", ...series.map(s => s.name)],
+      cats.map((c, i) => [c, ...series.map(s => fmt(s.values[i]))]));
+  }
+
+  // Figure 6: hypothesis sketch (no data; shapes only)
+  {
+    const fig = document.getElementById("fig-sketch");
+    const series = [
+      { name: "Task accuracy", color: "--s1", f: x => 1 - 0.13 * Math.pow(x / 40, 1.4) },
+      { name: "Intervention gain", color: "--s2", f: x => 1 - 0.72 * Math.pow(x / 40, 0.75) },
+    ];
+    legend(fig.querySelector(".legend"), series, true);
+    const plot = fig.querySelector(".plot");
+    responsive(plot, W => {
+      plot.replaceChildren();
+      const H = 230, m = { t: 16, r: 120, b: 40, l: 16 };
+      const pw = W - m.l - m.r, ph = H - m.t - m.b;
+      const svg = svgEl("svg", { width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: "img",
+        "aria-label": "Hypothesis sketch: intervention gain falls faster than task accuracy as label noise grows" }, plot);
+      const x = v => m.l + (v / 40) * pw, y = v => m.t + ph - (v / 1.05) * ph;
+      svgEl("line", { x1: m.l, x2: m.l + pw, y1: y(0), y2: y(0), style: "stroke: var(--axis)", "shape-rendering": "crispEdges" }, svg);
+      svgEl("line", { x1: m.l, x2: m.l + pw, y1: y(1), y2: y(1), style: "stroke: var(--grid)", "shape-rendering": "crispEdges" }, svg);
+      svgEl("text", { x: m.l + pw + 6, y: y(1) - 10, class: "axis-label" }, svg).textContent = "clean labels";
+      for (const t of [0, 10, 20, 30, 40]) {
+        svgEl("text", { x: x(t), y: y(0) + 16, "text-anchor": "middle", class: "tick" }, svg).textContent = t + "%";
+      }
+      svgEl("text", { x: m.l + pw / 2, y: H - 4, "text-anchor": "middle", class: "axis-label" }, svg).textContent =
+        "Concept-label noise rate (flipped labels)";
+      for (const s of series) {
+        const pts = [];
+        for (let v = 0; v <= 40; v += 1) pts.push(`${x(v).toFixed(1)},${y(s.f(v)).toFixed(1)}`);
+        svgEl("polyline", { points: pts.join(" "), fill: "none", style: `stroke: var(${s.color})`, "stroke-width": 2,
+                            "stroke-linejoin": "round", "stroke-linecap": "round" }, svg);
+        svgEl("circle", { cx: x(40), cy: y(s.f(40)), r: 4, style: `fill: var(${s.color}); stroke: var(--card)`, "stroke-width": 2 }, svg);
+        svgEl("text", { x: x(40) + 10, y: y(s.f(40)) + 4, class: "cat" }, svg).textContent = s.name;
+      }
+    });
+  }
+  // Figure 9: local storage by approach (rough estimates)
+  {
+    const fig = document.getElementById("fig-storage");
+    const cats = ["All CUB\nimages", "Streaming\ncache cap", "One batch\n(2k crops)", "Labels\n(100k rows)"];
+    const mb = [1100, 500, 30, 15];
+    columns(fig.querySelector(".plot"), { title: "Local storage by approach, MB", categories: cats, max: 1200,
+      ticks: [0, 300, 600, 900, 1200], series: [{ name: "", color: "--s1", values: mb }], label: () => true,
+      fmt: v => v.toLocaleString("en"), unit: " MB" });
+    dataTable(fig.querySelector("table"), ["Approach", "Local storage (MB, estimate)"],
+      cats.map((c, i) => [c.replace("\n", " "), String(mb[i])]));
+  }
+})();
+</script>
+<script>
+(() => {
+  const NS = "http://www.w3.org/2000/svg";
+  const STATES = ["", "present", "absent", "hidden", "unsure"];
+  const TEXT = { present: "✓ present", absent: "✗ absent", hidden: "◌ not visible", unsure: "? unsure" };
+  const KEY = { "1": "present", "2": "absent", "3": "hidden", "4": "unsure", "0": "" };
+  const grid = document.getElementById("mock-tiles"), counts = document.getElementById("mock-counts");
+  const toast = document.getElementById("mock-toast");
+  let batch = 3;
+
+  function rng(seed) {  // mulberry32: deterministic placeholder tiles
+    return () => {
+      seed |= 0; seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function el(tag, attrs, parent) {
+    const e = document.createElementNS(NS, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    parent.appendChild(e);
+    return e;
+  }
+
+  function head(r, stripe, hidden) {  // a placeholder drawing of a bird's head, not a real crop
+    const svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", "0 0 100 100");
+    svg.setAttribute("aria-hidden", "true");
+    const heads = ["#b59f84", "#8e8a83", "#a3876a", "#c2b6a3", "#7d7468"], throats = ["#efe6d6", "#e4ddd0", "#f3eee4"];
+    const dx = (r() - 0.5) * 10, dy = (r() - 0.5) * 8, rot = (r() - 0.5) * 18;
+    el("rect", { width: 100, height: 100, style: "fill: var(--bg)" }, svg);
+    el("path", { d: `M0,${82 + dy} Q50,${74 + dy} 100,${86 + dy}`, fill: "none", stroke: "#8a7a62", "stroke-width": 3, opacity: 0.5 }, svg);
+    const g = el("g", { transform: `translate(${dx},${dy}) rotate(${rot} 52 52)` }, svg);
+    el("circle", { cx: 50, cy: 50, r: 28, fill: heads[Math.floor(r() * heads.length)] }, g);
+    el("ellipse", { cx: 60, cy: 66, rx: 15, ry: 10, fill: throats[Math.floor(r() * throats.length)] }, g);
+    if (r() < 0.35) el("path", { d: "M26,40 Q48,14 72,32 L64,36 Q48,26 32,44 Z", fill: "#4a4038" }, g);  // cap
+    if (stripe) el("path", { d: "M76,58 Q70,70 58,78", fill: "none", stroke: "#2b2722", "stroke-width": 5, "stroke-linecap": "round" }, g);
+    el("polygon", { points: "76,45 95,52 76,57", fill: "#3b3631" }, g);
+    el("circle", { cx: 61, cy: 43, r: 4.5, fill: "#fff" }, g);
+    el("circle", { cx: 62, cy: 43, r: 2.4, fill: "#141414" }, g);
+    if (hidden) el("ellipse", { cx: 70, cy: 58, rx: 30, ry: 17, fill: "#5f8a4b", transform: "rotate(-30 70 58)" }, svg);  // a leaf
+    return svg;
+  }
+
+  function render() {
+    grid.replaceChildren();
+    const r = rng(batch * 7919);
+    for (let i = 0; i < 12; i++) {
+      const id = 1000 + Math.floor(r() * 10788), p = 0.02 + r() * 0.17;
+      const roll = r(), stripe = roll < 0.4, hidden = roll > 0.82;
+      const tile = document.createElement("button");
+      tile.type = "button";
+      tile.className = "tile";
+      tile.dataset.s = "";
+      tile.dataset.id = id;
+      tile.dataset.p = p.toFixed(2);
+      const state = document.createElement("span");
+      state.className = "state";
+      const chip = document.createElement("span");
+      chip.className = "chip";
+      chip.textContent = "p " + p.toFixed(2);
+      const meta = document.createElement("span");
+      meta.className = "meta";
+      meta.textContent = "#" + id;
+      tile.append(head(r, stripe, hidden), state, chip, meta);
+      tile.addEventListener("click", () => set(tile, STATES[(STATES.indexOf(tile.dataset.s) + 1) % STATES.length]));
+      tile.addEventListener("keydown", e => onKey(e, tile, i));
+      grid.append(tile);
+      label(tile);
+    }
+    update();
+  }
+
+  function label(tile) {
+    const s = tile.dataset.s;
+    tile.querySelector(".state").textContent = TEXT[s] || "";
+    tile.setAttribute("aria-label", `Image ${tile.dataset.id}, model score ${tile.dataset.p}, ${s ? TEXT[s].slice(2) : "unlabelled"}`);
+  }
+
+  function set(tile, s) {
+    tile.dataset.s = s;
+    label(tile);
+    update();
+  }
+
+  function onKey(e, tile, i) {
+    if (e.key in KEY) { set(tile, KEY[e.key]); e.preventDefault(); return; }
+    const cols = getComputedStyle(grid).gridTemplateColumns.split(" ").length;
+    const step = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: cols, ArrowUp: -cols }[e.key];
+    if (step) {
+      const next = grid.children[i + step];
+      if (next) next.focus();
+      e.preventDefault();
+    }
+  }
+
+  function update() {
+    const tally = { present: 0, absent: 0, hidden: 0, unsure: 0, "": 0 };
+    for (const t of grid.children) tally[t.dataset.s]++;
+    counts.replaceChildren();
+    const rows = [["present", "--s1"], ["absent", "--s2"], ["hidden", "--tick"], ["unsure", "--s3"], ["", null]];
+    for (const [s, color] of rows) {
+      const name = document.createElement("span");
+      if (color) {
+        const d = document.createElement("span");
+        d.className = "dot";
+        d.style.background = `var(${color})`;
+        name.append(d);
+      }
+      name.append(document.createTextNode(s ? TEXT[s].slice(2) : "unlabelled"));
+      const n = document.createElement("span");
+      n.textContent = tally[s];
+      counts.append(name, n);
+    }
+  }
+
+  document.getElementById("mock-rest").addEventListener("click", () => {
+    for (const t of grid.children) if (!t.dataset.s) { t.dataset.s = "present"; label(t); }
+    update();
+  });
+  document.getElementById("mock-submit").addEventListener("click", () => {
+    const left = [...grid.children].filter(t => !t.dataset.s).length;
+    if (left) { toast.style.color = "var(--warn)"; toast.textContent = `${left} tiles are still unlabelled.`; return; }
+    toast.style.color = "var(--ok)";
+    toast.textContent = `Saved 12 rows to labels.sqlite (mock). Batch ${batch} done.`;
+    batch = batch % 12 + 1;
+    document.getElementById("mock-batch").textContent = batch;
+    document.getElementById("mock-prog").style.width = (batch / 12 * 100) + "%";
+    render();
+  });
+  render();
+})();
+</script>
+</body>
+</html>

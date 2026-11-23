@@ -26,7 +26,8 @@ class OracleScorer:
     def score(self, concepts: ConceptSet, ctx: "Context", split: str) -> torch.Tensor:
         fs = ctx.split(split)
         if fs.concept_labels is None:
-            raise RuntimeError("oracle scorer needs a dataset with concept annotations")
+            raise RuntimeError(f"The oracle scorer needs concept annotations, which split '{split}' lacks; "
+                               "use `scorer: grounding_dino`")
         idx = match_names(concepts.names, ctx.dataset.concept_names)
         out = torch.zeros(len(fs), len(concepts))
         for k, j in enumerate(idx):

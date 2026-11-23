@@ -1,0 +1,32 @@
+# Label-free CBM (Oikarinen et al., ICLR 2023) on CIFAR-100 (fine labels). CIFAR-100 has no concept
+# annotations, so concepts come from an LLM and their targets from CLIP. Sibling: cifar10_lfcbm.yaml.
+#
+# Matched: CLIP RN50 image features as the backbone and CLIP ViT-B/16 as the concept teacher; LLM
+#   prompts for important features, things seen around the class and superclasses; filters for
+#   concepts too close to a class (0.85), near-duplicates (0.9) and concepts whose top-5 training
+#   activations stay below 0.25; cubed teacher similarities as targets (`power: 3`); elastic-net
+#   final layer (alpha 0.99, lambda 0.0007).
+# Remaining gaps:
+#   - concepts come from Claude, not GPT-3, and the rules filter limits names to 4 words, not 30 characters;
+#   - the class and duplicate filters use the teacher's CLIP text embeddings only (LF-CBM also uses a
+#     sentence encoder);
+#   - the concept layer trains on standardized cubed targets, not with LF-CBM's cos^3 similarity loss,
+#     and no concepts are dropped after training (LF-CBM's interpretability cutoff of 0.45);
+#   - val is a seeded 10% holdout of train (`dataset.val_fraction`, `dataset.split_seed`).
+name: cifar100_lfcbm
+dataset: {name: cifar100, root: data/cifar-100-python}
+backbone: {name: clip, model: RN50, pretrained: openai}
+teacher: {name: clip, model: ViT-B-16, pretrained: openai}
+stages:
+  discovery: {name: llm, per_class: 10}
+  filtering:
+    - {name: rules}
+    - {name: clip, class_sim: 0.85, dedupe_sim: 0.9, min_top_activation: 0.25}
+  generation: {name: scores}
+  alignment: {name: clip, power: 3}
+  predictor: {name: sparse, lam: 0.0007}
+  training: {name: sequential}
+evaluation:
+  - {name: shift}
+  - {name: leakage}
+paths: {cache: .cache, runs: runs/cifar100, results: results/cifar100.jsonl}

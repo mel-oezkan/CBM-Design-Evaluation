@@ -83,9 +83,18 @@ class PipelineBuilder:
         return any(e.needs_patches for e in self.evaluators.values()) or \
             bool(self.instances is not None and self.instances.needs_patches)
 
+    def _check_concept_labels(self, dataset) -> None:
+        if dataset.concept_names:
+            return
+        labelled = [n for n, e in self.evaluators.items() if e.needs_concept_labels]
+        if labelled:
+            raise ValueError(f"Evaluators {labelled} score concepts against annotations, but dataset "
+                             f"'{dataset.name}' has none; remove them from `evaluation:`")
+
     def context(self) -> Context:
         before = rng_state()
         dataset = DATASETS.build(self.cfg.dataset)
+        self._check_concept_labels(dataset)
         backbone = BACKBONES.build(self.cfg.backbone)
         teacher = BACKBONES.build(self.cfg.teacher) if self.cfg.teacher else None
         eval_datasets = {alias: DATASETS.build(spec) for alias, spec in (self.cfg.eval_datasets or {}).items()}
@@ -114,6 +123,7 @@ class PipelineBuilder:
         if key is not None and ctx.key is not None and key != ctx.key:
             raise ValueError("The context passed to `run` was built for another dataset, backbone, teacher, "
                              "eval_datasets, instances, device or cache path; pass ctx=None to build one")
+        self._check_concept_labels(ctx.dataset)
         return ctx.for_run(self.cfg)
 
     def concepts(self, ctx: Context, trace: list[tuple[str, int]] | None = None) -> ConceptSet:

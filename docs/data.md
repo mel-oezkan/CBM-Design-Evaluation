@@ -14,6 +14,14 @@ Point `dataset.root` at:
   Optional part segmentations for `part_iou` (CUB70, 67 classes):
   `wget https://github.com/hamedbehzadi/CUB70-PartSegmentationDataset/raw/main/AnnotationMasksPerclass.tar.xz`,
   then extract to `<root>/part_segmentations/` (or set `dataset.part_segmentations`).
+- **CIFAR-10 / CIFAR-100** (`cifar10`, `cifar100`): the extracted python version from
+  [the CIFAR page](https://www.cs.toronto.edu/~kriz/cifar.html). `root` is the extracted folder itself
+  (`cifar-10-batches-py/` or `cifar-100-python/`); CIFAR-100 uses its 100 fine labels. Validation is a
+  seeded holdout of the official train split (`val_fraction: 0.1`, `split_seed: 0`). There are no
+  concept annotations, so use label-free discovery (`llm`, `kb`) and alignment (`clip`, `dino`); `human`
+  alignment, `dataset` discovery and the `concepts`, `localization`, `part_iou` and `keypoint_distance`
+  evaluators refuse the dataset. Images stay in memory, so stages that read image files (`vlm`
+  discovery, the `grounding_dino` scorer, segment instance sources) refuse them too.
 - **MetaShift**: a folder with `metadata.csv` (`filename, y, a, split`), as produced by the
   [SubpopBench](https://github.com/YyzHarry/SubpopBench) preprocessing scripts.
 - **Synthetic**: generated in memory; no `root` needed. Pair it with the `toy` backbone for fully

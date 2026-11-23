@@ -11,6 +11,7 @@ import pytest
 
 from cbm_eval.backbones.inception import InceptionBackbone
 from cbm_eval.backbones.toy import ToyBackbone
+from cbm_eval.data.cifar import CIFAR10, CIFAR100
 from cbm_eval.data.cub import CUB
 from cbm_eval.data.features import load_features
 from cbm_eval.data.metashift import MetaShift
@@ -97,6 +98,17 @@ def test_dataset_root_is_keyed(tmp_path, cls, header, exempt):
     a = cls(root=_metadata(tmp_path / "a", header)).cache_key()
     b = cls(root=_metadata(tmp_path / "b", header)).cache_key()
     assert a != b
+
+
+@pytest.mark.parametrize("cls, fixture", [(CIFAR10, "cifar10_root"), (CIFAR100, "cifar100_root")])
+def test_cifar_keys_cover_root_and_val_holdout(tmp_path, request, cls, fixture):
+    root = request.getfixturevalue(fixture)
+    perturbed = {"root": str(shutil.copytree(root, tmp_path / "copy" / root.name)), "val_fraction": 0.3,
+                 "split_seed": 1}
+    assert init_params(cls) == set(perturbed)
+    base = cls(root=str(root)).cache_key()
+    for name, value in perturbed.items():
+        assert cls(**{"root": str(root), name: value}).cache_key() != base, f"{cls.__name__}({name}=...)"
 
 
 def test_cub_keys_cover_features_and_parts(tmp_path, cub_root):

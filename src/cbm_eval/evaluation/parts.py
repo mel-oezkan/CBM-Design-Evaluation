@@ -34,7 +34,7 @@ from .base import Evaluator
 
 
 class _PartEvaluator(Evaluator):
-    needs_patches = True
+    needs_patches = needs_concept_labels = True
     seg_size: int = 56
 
     def __init__(self, split: str = "test", select: str = "argmax", batch_size: int = 64):

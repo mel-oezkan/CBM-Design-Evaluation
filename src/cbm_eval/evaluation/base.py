@@ -12,6 +12,7 @@ class Evaluator(ABC):
     """Computes a flat dict of metrics for one trained CBM. Keys are prefixed by the evaluator name."""
 
     needs_patches: bool = False
+    needs_concept_labels: bool = False  # True if it only scores against the training dataset's annotations
 
     @abstractmethod
     def evaluate(self, cbm: "TrainedCBM", ctx: "Context") -> dict[str, float]: ...

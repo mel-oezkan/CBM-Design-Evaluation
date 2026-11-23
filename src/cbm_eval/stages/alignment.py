@@ -71,6 +71,9 @@ class HumanAlignment(Alignment):
     """Binary targets from dataset annotations; concepts without annotations are dropped."""
 
     def fit(self, concepts, ctx):
+        if not ctx.dataset.concept_names:
+            raise RuntimeError(f"Dataset '{ctx.dataset.name}' has no concept annotations, so `stages.alignment: "
+                               "human` has no targets; use a label-free alignment such as {name: clip}")
         idx = match_names(concepts.names, ctx.dataset.concept_names)
         keep = [i for i, j in enumerate(idx) if j is not None]
         if not keep:

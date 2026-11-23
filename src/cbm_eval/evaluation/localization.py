@@ -23,7 +23,7 @@ from .base import Evaluator
 
 @EVALUATION.register("localization")
 class LocalizationEvaluator(Evaluator):
-    needs_patches = True
+    needs_patches = needs_concept_labels = True
 
     def __init__(self, split: str = "test", batch_size: int = 256):
         self.split, self.batch_size = split, batch_size
