@@ -277,10 +277,12 @@ wrote results/discovery_arms.json
 - The intervals use t quantiles and the variance of each arm. With 3 seeds this matters. The
   effects model pools the variance of all arms and uses 1.96: on the same runs it gives
   `[-0.4465, -0.3255]` for the `sae` effect. The intervals are not clipped to the metric's range.
-- `--reference` takes an arm label or a registered name (`dataset`, `sae`). Without it, the arm
+- `--reference` takes an arm label or its registered name (`dataset`, `sae`, `rules>select`). Without it, the arm
   with the most runs is the reference. If arms tie, `analyze` asks for `--reference`.
 - Each arm must be one configuration. If another factor or the `run_id` varies inside the rows,
-  `analyze` stops and names them. Restrict the rows with `--query`.
+  `analyze` stops and names them. Restrict the rows with `--query`. Settings that are not factors
+  (`evaluation`, `eval_datasets`, `teacher`) are not checked across arms: compare arms from one
+  ablation, or from one results file written with one evaluation setup.
 
 ### JSON schema `cbm-eval/arms/v1`
 
@@ -300,7 +302,7 @@ Each element of `arms`:
 | Key | Type | Meaning |
 |---|---|---|
 | `arm` | string | the factor label from the results, e.g. `"sae(epochs=30,k=6,n_latents=64)"`; unique |
-| `name` | string | the registered name, e.g. `"sae"`; two arms can share it |
+| `name` | string | the registered name, e.g. `"sae"`; for a chain factor such as `filtering`, the names joined by `>` (`"rules>select"`); two arms can share it |
 | `run_id` | string | the run id of the arm |
 | `reference` | bool | `true` for the reference arm |
 | `n_seeds` | int | distinct seeds |

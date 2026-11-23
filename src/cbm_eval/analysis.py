@@ -135,6 +135,11 @@ def _metric_col(m: str) -> str:
     return m if m.startswith("metric.") else f"metric.{m}"
 
 
+def _registered_name(label: str) -> str:
+    """``sae(k=4)`` -> ``sae``; a chain ``rules>select(k=20)`` -> ``rules>select``."""
+    return ">".join(part.split("(")[0] for part in label.split(">"))
+
+
 def _pick_reference(levels: list[str], counts: pd.Series, factor: str, reference: str | None) -> str:
     if reference is None:
         top = counts[counts == counts.max()].index.tolist()
@@ -144,7 +149,7 @@ def _pick_reference(levels: list[str], counts: pd.Series, factor: str, reference
         return top[0]
     if reference in levels:
         return reference
-    named = [lv for lv in levels if lv.split("(")[0] == reference]
+    named = [lv for lv in levels if _registered_name(lv) == reference]
     if len(named) != 1:
         raise ValueError(f"--reference '{reference}' matches {len(named)} arms of '{factor}'; "
                          f"use the full arm label, one of {levels}")
@@ -161,7 +166,8 @@ def arms(df: pd.DataFrame, factor: str, metrics: list[str], reference: str | Non
     effect ``arm - reference`` with a Welch t interval (``NaN`` for the reference itself). Unlike
     `effects`, the intervals use t quantiles and per-arm variances, which matters with 3 seeds.
     Every arm must be one configuration: if another factor or the run id varies inside the rows,
-    this raises and names the columns to restrict with ``df.query`` (``--query``).
+    this raises and names the columns to restrict with ``df.query`` (``--query``). Settings that are
+    not factors (``evaluation``, ``eval_datasets``, ``teacher``) are not checked across arms.
     """
     col = factor if factor.startswith("factor.") else f"factor.{factor}"
     if col not in df:
@@ -193,7 +199,7 @@ def arms(df: pd.DataFrame, factor: str, metrics: list[str], reference: str | Non
                 continue
             m, lo, hi = mean_ci(rows[c], level)
             d, dlo, dhi = (math.nan,) * 3 if lv == ref else diff_ci(rows[c], df.loc[df[col] == ref, c], level)
-            out.append({"arm": lv, "name": lv.split("(")[0], "run_id": runs[lv][0], "n_seeds": rows["seed"].nunique(),
+            out.append({"arm": lv, "name": _registered_name(lv), "run_id": runs[lv][0], "n_seeds": rows["seed"].nunique(),
                         "n_concepts": n_concepts, "n_discovered": n_disc, "metric": c.removeprefix("metric."),
                         "n": int(rows[c].notna().sum()), "mean": m, "std": float(rows[c].std(ddof=1)),
                         "ci_low": lo, "ci_high": hi, "effect": d, "effect_ci_low": dlo, "effect_ci_high": dhi})

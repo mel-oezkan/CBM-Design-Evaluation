@@ -65,6 +65,10 @@ def test_arms_reference_by_registered_name_and_errors():
     other = df.assign(**{"factor.predictor": ["dense", "sparse", "dense", "dense"]})
     with pytest.raises(ValueError, match="also vary.*--query"):
         analysis.arms(other, "discovery", ["m"], reference="dataset")
+    chain = pd.DataFrame({"run_id": ["a", "a", "b", "b"], "seed": [0, 1, 0, 1], "metric.m": [0.5, 0.6, 0.1, 0.2],
+                          "factor.filtering": ["rules>clip(dedupe_sim=0.9)"] * 2 + ["rules>select(k=20)"] * 2})
+    t = analysis.arms(chain, "filtering", ["m"], reference="rules>select")
+    assert t.attrs["reference"] == "rules>select(k=20)" and t["name"].tolist() == ["rules>select", "rules>clip"]
     mixed = df.assign(run_id=["a", "b", "c", "c"])
     with pytest.raises(ValueError, match="more than one run_id"):
         analysis.arms(mixed, "discovery", ["m"], reference="dataset")
