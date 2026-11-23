@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 import sys
@@ -47,6 +48,22 @@ def test_month_status_counts_usage_against_the_credit():
     assert oct_["counted"] == pytest.approx(40.30, abs=0.01) and oct_["credit_left"] == 0
     assert oct_["counted"] - 30 == pytest.approx(oct_["billed"], abs=0.01)  # what went beyond the credit
     assert nov["counted"] == 0 and nov["credit_left"] == 30  # storage only: covered by the allowance
+
+
+def test_overhead_follows_the_container_settings(tmp_path):
+    # the live app: 300 s start + 60 s scale-down
+    assert ops.OVERHEAD_HOURS == pytest.approx(0.1)
+    # a change in cbm_modal.py reaches the worst case without a second edit
+    app = tmp_path / "cbm_modal.py"
+    app.write_text("import modal\nSTARTUP_TIMEOUT_S = 600\nSCALEDOWN_WINDOW_S = 120\n")
+    c = ops._app_constants(app)
+    assert (c["STARTUP_TIMEOUT_S"] + c["SCALEDOWN_WINDOW_S"]) / 3600 == pytest.approx(0.2)
+    # and `sh` really uses the constants, not literals that could drift from them
+    src = ast.parse((Path(ops.__file__).parent / "cbm_modal.py").read_text())
+    sh = next(f for f in src.body if isinstance(f, ast.FunctionDef) and f.name == "sh")
+    kw = {k.arg: k.value for k in sh.decorator_list[0].keywords}
+    assert ast.unparse(kw["startup_timeout"]) == "STARTUP_TIMEOUT_S"
+    assert ast.unparse(kw["scaledown_window"]) == "SCALEDOWN_WINDOW_S"
 
 
 def test_worst_case_includes_overhead():

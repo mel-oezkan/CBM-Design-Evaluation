@@ -233,7 +233,9 @@ plan ──> owner approval ──> launch ──> watch ──> fetch
 Run each command as `uv run python scripts/modal_ops.py <command>`. `ledger` lists every launch
 with its worst case and its billed cost.
 
-The worst case is `(max_hours + 0.1 h) × hourly rate` of the profile. It is a hard bound: the
+The worst case is `(max_hours + 0.1 h) × hourly rate` of the profile. The 0.1 h is the container's
+start (`STARTUP_TIMEOUT_S`, 300 s) plus its idle scale-down (`SCALEDOWN_WINDOW_S`, 60 s) in
+`scripts/cbm_modal.py`; `modal_ops.py` reads both from there. It is a hard bound: the
 container's timeout is `max_hours`, its CPU and memory are limits, and it gets no retries and one
 container at most. Modal stops the container at the timeout even when the launching machine is off.
 At the 2026-11-23 rates, `--profile cpu --max-hours 0.25` has a worst case of $0.06.

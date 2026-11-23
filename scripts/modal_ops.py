@@ -28,6 +28,7 @@ The monthly free credit is ``$CBM_MODAL_CREDIT`` (default 30, the Starter plan's
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
 import shutil
@@ -41,8 +42,21 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-# container start (startup_timeout 300 s) + idle scale-down (60 s) in cbm_modal.sh: added to every worst case
-OVERHEAD_HOURS = 0.1
+
+
+def _app_constants(path: Path = REPO / "scripts" / "cbm_modal.py") -> dict[str, object]:
+    """Module-level literal constants of ``cbm_modal.py``, read from its source: importing it needs ``modal``."""
+    tree = ast.parse(path.read_text())
+    return {t.id: n.value.value for n in tree.body if isinstance(n, ast.Assign) and isinstance(n.value, ast.Constant)
+            for t in n.targets if isinstance(t, ast.Name)}
+
+
+# Billed time outside the timeout (container start + idle scale-down of `cbm_modal.sh`), added to every worst
+# case. Derived from the values the container really gets, so changing them there cannot break the cap.
+_APP = _app_constants()
+OVERHEAD_HOURS = (_APP["STARTUP_TIMEOUT_S"] + _APP["SCALEDOWN_WINDOW_S"]) / 3600
+# Modal reports only the credit used, not the plan's grant, so the grant is configured: $CBM_MODAL_CREDIT
+# overrides this Starter-plan default. If it is too high, `billed` in `budget` shows real charges at once.
 DEFAULT_CREDIT = 30.0
 
 
