@@ -208,10 +208,11 @@ Training runs on the CPU unless the training stage sets `device` (e.g. `device: 
 
 ## Run on Modal
 
-Feature extraction, runs on real data and anything that needs a GPU run on
-[Modal](https://modal.com), not on your machine. `scripts/modal_ops.py` is the launcher. It runs one
-shell command in a container on Modal and keeps the cost below a dollar cap that the project owner
-approves. Install the client with `uv sync --extra modal` and authenticate once with
+In this project's own setup, feature extraction, runs on real data and anything that needs a GPU
+run on [Modal](https://modal.com), not on the owner's machine. `scripts/modal_ops.py` is the
+launcher. It runs one shell command in a container on Modal and keeps the cost below a dollar cap
+that the project owner approves. It uses the owner's Modal volume `cbm-koh2020`; with your own Modal
+account it creates an empty volume of that name. Install the client with `uv sync --extra modal` and authenticate once with
 `uv run modal setup`.
 
 A launch has five steps:
@@ -238,8 +239,17 @@ container at most. Modal stops the container at the timeout even when the launch
 At the 2026-11-23 rates, `--profile cpu --max-hours 0.25` has a worst case of $0.06.
 
 Inside the container, the command runs on a copy of your working tree with the locked
-dependencies. `data/` and `.cache/` are on the project volume, so a feature cache filled by one
-launch serves every later launch. `results/` and `runs/` belong to the launch.
+dependencies. `results/` and `runs/` belong to the launch. `data/` and `.cache/` are on the project
+volume:
+
+- A feature cache filled by one launch serves every later launch, from every branch. The cache key
+  covers the dataset and the backbone, not the code. A branch that changes feature extraction
+  without changing `cache_key()` writes entries that other branches then read.
+- The volume holds `data/CUB_200_2011.tgz` and the authors' split `data/CUB_processed/`, not the
+  unpacked images. A CUB command unpacks the archive first. The dataset cache key contains the
+  resolved root, so the caches that `scripts/koh2020_modal.py` filled do not hit.
+- Result rows written on Modal have `git_commit: null` (#46). The launch's `launch.json` records the
+  commit, the branch and whether the working tree was dirty.
 
 ```bash
 uv run python scripts/modal_ops.py launch --profile cpu --max-hours 0.25 --approve-usd 0.06 \

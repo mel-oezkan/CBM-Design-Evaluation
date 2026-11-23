@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
+import types
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -97,3 +99,26 @@ def test_launch_refuses_without_approval(monkeypatch, tmp_path):
     with pytest.raises(SystemExit, match="no --approve-usd"):
         ops.main(["launch", "--profile", "cpu", "--max-hours", "1", "--purpose", "t", "--", "echo", "hi"])
     assert not (tmp_path / "ledger.jsonl").exists()
+
+
+def test_fetch_puts_the_launch_dir_at_dest(monkeypatch, tmp_path):
+    # `modal volume get VOL ops/<id> X` writes X/<id>/... into an existing directory X
+    ledger = tmp_path / "ledger.jsonl"
+    ledger.write_text(json.dumps({"launch_id": "L1", "app_id": "ap-1"}) + "\n")
+    monkeypatch.setenv("CBM_MODAL_LEDGER", str(ledger))
+    monkeypatch.setitem(sys.modules, "cbm_modal", types.SimpleNamespace(VOLUME="vol"))
+
+    def fake_get(cmd, check):
+        assert cmd[-2] == "ops/L1" and Path(cmd[-1]).is_dir()
+        (Path(cmd[-1]) / "L1" / "results").mkdir(parents=True)
+        (Path(cmd[-1]) / "L1" / "log.txt").write_text("new")
+        (Path(cmd[-1]) / "L1" / "results" / "r.jsonl").write_text("{}")
+
+    monkeypatch.setattr(ops.subprocess, "run", fake_get)
+    dest = tmp_path / "out" / "L1"
+    dest.mkdir(parents=True)
+    (dest / "log.txt").write_text("old")
+    (dest / "notes.txt").write_text("kept")
+    ops.main(["fetch", "L1", "--dest", str(dest)])
+    assert (dest / "log.txt").read_text() == "new" and (dest / "results" / "r.jsonl").exists()
+    assert (dest / "notes.txt").exists() and sorted(p.name for p in dest.parent.iterdir()) == ["L1"]

@@ -10,8 +10,10 @@ The image installs the locked dependencies (``uv.lock``, core + extras + dev) on
 downloaded on the launching machine. The working tree (not just the last commit) is copied to
 ``/root/repo``, so a launch from a git worktree runs that worktree's code. Inside the container:
 
-- ``data/`` and ``.cache/`` are the project Volume's ``data/`` and ``cache/`` (CUB and the feature cache
-  that ``koh2020_modal.py`` filled live there too);
+- ``data/`` and ``.cache/`` are the project Volume's ``data/`` and ``cache/``. The Volume's ``data/`` holds
+  ``CUB_200_2011.tgz`` and the authors' split ``CUB_processed/``, not the unpacked images: a CUB command
+  unpacks them first. Dataset cache keys contain the resolved root (``/vol/data/...`` here), so the
+  feature caches that ``koh2020_modal.py`` filled (root on local disk) do not hit;
 - ``runs/`` and ``results/`` are ``ops/<launch_id>/`` on the Volume, next to ``log.txt`` (the command's
   combined stdout/stderr) and ``launch.json`` (what was launched, from which commit);
 - ``cbm-eval`` is on the PATH, as after ``uv sync`` locally.
@@ -32,7 +34,8 @@ VOL = "/vol"
 VOLUME = "cbm-koh2020"  # the project volume: CUB, the authors' split and the feature cache
 WORKDIR = "/root/repo"
 _IGNORE = [".git", ".venv", "data", ".cache", "runs", "results", "site", "papers", ".claude", ".pytest_cache",
-           "**/__pycache__", "**/.DS_Store", "reports"]
+           "**/__pycache__", "**/.DS_Store", "reports",
+           "**/.env", "**/.env.*", "**/*.pem", "**/*.key"]  # never upload local credentials
 
 app = modal.App("cbm-eval-ops")
 vol = modal.Volume.from_name(VOLUME, create_if_missing=True)
@@ -56,8 +59,11 @@ def _link(link: Path, target: Path) -> None:
     link.symlink_to(target)
 
 
-# Conservative defaults; `modal_ops.py launch` replaces gpu/cpu/memory/timeout per launch.
-@app.function(image=image, volumes={VOL: vol}, cpu=1, memory=1024, timeout=300, retries=0, max_containers=1)
+# Conservative defaults; `modal_ops.py launch` replaces gpu/cpu/memory/timeout per launch. `with_options`
+# cannot change startup_timeout or scaledown_window: 300 s + 60 s = modal_ops.OVERHEAD_HOURS (0.1 h), the
+# allowance every worst case adds to the timeout. Change them together.
+@app.function(image=image, volumes={VOL: vol}, cpu=1, memory=1024, timeout=300, startup_timeout=300,
+              scaledown_window=60, retries=0, max_containers=1)
 def sh(command: str, launch_id: str, launch: dict) -> dict:
     """Run ``command`` with bash in ``/root/repo``; stream its output to the logs and to
     ``ops/<launch_id>/log.txt`` on the Volume. Returns the exit code, the wall time and the log tail."""

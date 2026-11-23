@@ -30,8 +30,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from dataclasses import asdict, dataclass
@@ -39,7 +41,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-OVERHEAD_HOURS = 0.1  # container start, image pull, idle scale-down: added to every worst case
+# container start (startup_timeout 300 s) + idle scale-down (60 s) in cbm_modal.sh: added to every worst case
+OVERHEAD_HOURS = 0.1
 DEFAULT_CREDIT = 30.0
 
 
@@ -314,13 +317,20 @@ def cmd_watch(a) -> None:
 
 
 def cmd_fetch(a) -> None:
+    """Copy ``ops/<launch_id>/`` to ``dest`` (files already there are overwritten, others kept).
+
+    ``modal volume get VOL ops/<id> X`` writes ``X/<id>/...`` only if ``X`` is an existing directory; if
+    ``X`` does not exist, every file is written to the path ``X`` itself. So it downloads into a fresh
+    temporary directory and moves ``<id>/`` into place."""
     e = _find(a.ref)
-    dest = Path(a.dest or REPO / "results" / "modal" / e["launch_id"])
+    launch_id = e["launch_id"]
+    dest = Path(a.dest or REPO / "results" / "modal" / launch_id)
     dest.parent.mkdir(parents=True, exist_ok=True)
     sys.path.insert(0, str(REPO / "scripts"))
     from cbm_modal import VOLUME
-    subprocess.run([_modal_exe(), "volume", "get", "--force", VOLUME,
-                    f"ops/{e['launch_id']}", str(dest)], check=True)
+    with tempfile.TemporaryDirectory(dir=dest.parent) as tmp:
+        subprocess.run([_modal_exe(), "volume", "get", VOLUME, f"ops/{launch_id}", tmp], check=True)
+        shutil.copytree(Path(tmp, launch_id), dest, dirs_exist_ok=True)
     print(dest)
 
 
