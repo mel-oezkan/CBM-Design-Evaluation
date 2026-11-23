@@ -13,14 +13,14 @@ free credit unless ``--allow-billing`` is also given. Both flags stand for a dec
     python scripts/modal_ops.py budget                        # this month: spend, credit left, running apps
     python scripts/modal_ops.py rates                         # $/h of every profile
     python scripts/modal_ops.py estimate --profile l4 --max-hours 1 [--hours 0.3]
-    python scripts/modal_ops.py launch --profile cpu --max-hours 0.25 --approve-usd 0.05 \\
+    python scripts/modal_ops.py launch --profile cpu --max-hours 0.25 --approve-usd 0.06 \\
         --purpose "repro #61" -- cbm-eval run configs/anchors/synthetic.yaml --seeds 0
     python scripts/modal_ops.py watch <launch_id>             # state, cost so far, % of cap [--every 10]
     python scripts/modal_ops.py fetch <launch_id>             # ops/<launch_id>/ -> results/modal/<launch_id>/
     python scripts/modal_ops.py ledger                        # every launch: estimate vs. actual
 
-Run it with the project environment (``uv run python scripts/modal_ops.py ...``); only ``launch`` and
-``watch`` import ``modal``. The ledger (one JSON line per launch) lives outside the repo, at
+Run it with the project environment (``uv run python scripts/modal_ops.py ...``); only ``launch``,
+``watch`` and ``fetch`` import ``modal``. The ledger (one JSON line per launch) lives outside the repo, at
 ``$CBM_MODAL_LEDGER`` or ``~/.local/state/cbm-eval/modal-ledger.jsonl``, so every worktree shares it.
 The monthly free credit is ``$CBM_MODAL_CREDIT`` (default 30, the Starter plan's).
 """
@@ -109,6 +109,24 @@ def app_cost(report: list[dict], app_id: str) -> float:
     return sum(float(r["cost"]) for r in report if r.get("object_id") == app_id)
 
 
+def _is_running(app: dict) -> bool:
+    """An app from ``modal app list --json`` that has containers up (any state but stopped / stopping)."""
+    return bool(app) and not app.get("state", "").startswith("stop") and int(app.get("tasks") or 0) > 0
+
+
+def launch_state(app: dict, result: dict | None, error: str | None) -> str:
+    """State of a launch from its app (``modal app list --json`` row, or ``{}``) and its call's outcome.
+    ``pending``: the app is up but no container runs yet (image build, container start)."""
+    if result is not None:
+        return "finished" if result["exit_code"] == 0 else f"failed (exit {result['exit_code']})"
+    if error is not None:
+        return f"error: {error}"
+    if _is_running(app):
+        return "running"
+    state = app.get("state", "unknown") if app else "unknown"
+    return state if state.startswith(("stop", "disabled", "unknown")) else "pending"
+
+
 def cost_so_far(billed_hours_cost: float, last_full_hour: datetime, now: datetime, hourly: float,
                 running: bool) -> float:
     """Billed full hours plus, while the app runs, the current partial hour at the profile's rate."""
@@ -119,9 +137,14 @@ def cost_so_far(billed_hours_cost: float, last_full_hour: datetime, now: datetim
 # ------------------------------------------------------------------------------------------------ Modal I/O
 
 
-def _modal(*args: str) -> object:
+def _modal_exe() -> str:
+    """The ``modal`` CLI of this Python environment, else the one on the PATH."""
     exe = Path(sys.executable).with_name("modal")
-    out = subprocess.run([str(exe) if exe.exists() else "modal", *args, "--json"], capture_output=True, text=True,
+    return str(exe) if exe.exists() else "modal"
+
+
+def _modal(*args: str) -> object:
+    out = subprocess.run([_modal_exe(), *args, "--json"], capture_output=True, text=True,
                          check=False)
     if out.returncode != 0:
         raise RuntimeError(f"`modal {' '.join(args)}` failed: {out.stderr.strip()[-500:]}")
@@ -138,11 +161,6 @@ def _status(credit: float) -> dict[str, float]:
 
 def _apps() -> dict[str, dict]:
     return {a["app_id"]: a for a in _modal("app", "list")}
-
-
-def _is_running(app: dict) -> bool:
-    """An app from ``modal app list --json`` that has containers up (any state but stopped / stopping)."""
-    return bool(app) and not app.get("state", "").startswith("stop") and int(app.get("tasks") or 0) > 0
 
 
 def _report_since(start: datetime) -> list[dict]:
@@ -262,15 +280,14 @@ def _watch_once(e: dict, rates_hourly: float) -> dict:
 
     started = datetime.fromisoformat(e["started"])
     app = _apps().get(e["app_id"], {})
-    running = _is_running(app)
-    state, result = ("running" if running else app.get("state", "unknown")), None
+    running, result, error = _is_running(app), None, None
     try:
         result = modal.FunctionCall.from_id(e["call_id"]).get(timeout=0)
-        state = "finished" if result["exit_code"] == 0 else f"failed (exit {result['exit_code']})"
     except TimeoutError:
         pass
     except Exception as err:  # noqa: BLE001 -- re-raises the remote error, of any type (timeout, crash, stop)
-        state = f"error: {type(err).__name__}: {str(err)[:200]}"
+        error = f"{type(err).__name__}: {str(err)[:200]}"
+    state = launch_state(app, result, error)
     now = _now()
     last_full = now.replace(minute=0, second=0, microsecond=0)
     billed = app_cost(_report_since(started), e["app_id"])
@@ -288,10 +305,10 @@ def cmd_watch(a) -> None:
         w = _watch_once(e, e["hourly_usd"])
         print(json.dumps(w, indent=None if a.every else 2), flush=True)
         if a.stop_at_usd is not None and w["state"] == "running" and w["cost_so_far_usd"] >= a.stop_at_usd:
-            subprocess.run(["modal", "app", "stop", e["app_id"]], check=False)
+            subprocess.run([_modal_exe(), "app", "stop", e["app_id"]], check=False)
             print(f"stopped {e['app_id']}: cost ${w['cost_so_far_usd']:.2f} reached --stop-at-usd {a.stop_at_usd}")
             return
-        if not a.every or w["state"] != "running":
+        if not a.every or w["state"] not in ("running", "pending"):
             return
         time.sleep(a.every * 60)
 
@@ -302,8 +319,7 @@ def cmd_fetch(a) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     sys.path.insert(0, str(REPO / "scripts"))
     from cbm_modal import VOLUME
-    exe = Path(sys.executable).with_name("modal")
-    subprocess.run([str(exe) if exe.exists() else "modal", "volume", "get", "--force", VOLUME,
+    subprocess.run([_modal_exe(), "volume", "get", "--force", VOLUME,
                     f"ops/{e['launch_id']}", str(dest)], check=True)
     print(dest)
 

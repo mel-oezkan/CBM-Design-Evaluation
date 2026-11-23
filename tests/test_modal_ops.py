@@ -76,6 +76,20 @@ def test_cost_so_far_adds_the_partial_hour_while_running():
     assert ops.cost_so_far(1.0, hour, now, 2.0, running=False) == pytest.approx(1.0)
 
 
+@pytest.mark.parametrize("app, result, error, state", [
+    ({"state": "ephemeral (detached)", "tasks": "0"}, None, None, "pending"),  # image build, container start
+    ({"state": "ephemeral (detached)", "tasks": "1"}, None, None, "running"),
+    ({"state": "stopped", "tasks": "0"}, None, None, "stopped"),
+    ({}, None, None, "unknown"),
+    ({"state": "stopped", "tasks": "0"}, {"exit_code": 0}, None, "finished"),
+    ({"state": "ephemeral (detached)", "tasks": "1"}, {"exit_code": 2}, None, "failed (exit 2)"),
+    ({"state": "stopped", "tasks": "0"}, None, "FunctionTimeoutError: x", "error: FunctionTimeoutError: x"),
+])
+def test_launch_state(app, result, error, state):
+    # `watch --every` keeps polling while the state is pending or running
+    assert ops.launch_state(app, result, error) == state
+
+
 def test_launch_refuses_without_approval(monkeypatch, tmp_path):
     monkeypatch.setattr(ops, "_rates", lambda: RATES)
     monkeypatch.setattr(ops, "_status", lambda credit: ops.month_status(NOVEMBER, credit))

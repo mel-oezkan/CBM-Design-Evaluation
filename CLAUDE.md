@@ -18,7 +18,9 @@ Anything heavier than the offline tests (feature extraction, runs on real data, 
 downloads) runs on Modal through `scripts/modal_ops.py`, never on the local machine. Each `launch`
 prices its worst case (timeout × live hourly rate) and refuses without an approved dollar cap
 covering it, or beyond the monthly free credit without `--allow-billing`; `budget`, `watch` and
-`ledger` show the spend. Do not `modal run` other scripts ad hoc.
+`ledger` show the spend (`docs/getting-started.md`, *Run on Modal*). Do not `modal run` other
+scripts ad hoc: `koh2020_modal.py`, `speedup_bench_modal.py` and `cache_prune_modal.py` bypass the
+cap, so run them only after the owner approves a dollar estimate.
 
 ## Architecture in one paragraph
 <!-- --8<-- [start:architecture] -->
