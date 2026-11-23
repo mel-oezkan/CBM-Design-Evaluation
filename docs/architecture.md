@@ -53,7 +53,7 @@ before generation because the concept layer is built from the aligned concepts.
 <div class="cbm-row cbm-tail" markdown>
 [**Results store**<span>One JSONL row per run and seed</span>](api/evaluation.md){.cbm-node}
 <div class="cbm-h-arrow">→</div>
-[**Analysis**<span>Effects models, Pareto frontiers</span>](api/evaluation.md){.cbm-node}
+[**Analysis**<span>Effects models, per-arm CIs, Pareto frontiers</span>](api/evaluation.md){.cbm-node}
 </div>
 <p class="cbm-map-note" markdown>Dashed borders mark optional parts. Without `instances:`, each image is one feature vector of shape (N, D). With it, every stage runs per instance on (N, M, D) plus a validity mask; see the [SEG-MIL-CBM example](instance-bags.md).</p>
 </div>
@@ -100,7 +100,7 @@ patch features.
 | Trained CBM | `model.py` — weights + cached concept scores, saved to `runs/<run_id>-s<seed>/` |
 | Evaluation suite | `evaluation/` — `shift`, `concepts`, `leakage`, `localization`, `keypoint_distance`, `part_iou`, `faithfulness` |
 | Results store | `results.py` — JSONL, one row per (run_id, seed) |
-| Analysis | `analysis.py` — seed aggregation, effects models, Pareto frontiers, effective robustness |
+| Analysis | `analysis.py` — seed aggregation, effects models, per-arm comparisons with t intervals (JSON for a results page), Pareto frontiers, effective robustness |
 
 ### Stages
 

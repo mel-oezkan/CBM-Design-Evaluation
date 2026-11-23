@@ -168,6 +168,10 @@ The output has three parts:
 
 3. **A Pareto frontier** over the two metrics, here worst-group accuracy against intervention gain.
 
+To compare the arms of one stage over several metrics, with a confidence interval for each arm
+and for its effect against a reference arm, use `--arms` (and `--json` for a results page); see
+[Compare the arms of one factor](experiments.md#compare-the-arms-of-one-factor).
+
 Your numbers can differ slightly with hardware and library versions. For custom analyses, load
 the results as a flat DataFrame (columns like `factor.discovery`, `metric.shift.test.wga`) and use
 the functions in [`cbm_eval.analysis`][cbm_eval.analysis]:

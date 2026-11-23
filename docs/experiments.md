@@ -214,6 +214,133 @@ df = df[df["tags.ablation"] == "waterbirds_budget"]
 print(analysis.aggregate(df, ["metric.shift.test.wga"], by=["factor.filtering", "factor.predictor"]))
 ```
 
+## Compare the arms of one factor
+
+A study that varies one stage asks: how does each choice (an "arm") compare with a reference arm?
+`--arms <factor>` answers this for several metrics at once. It replaces the table and the effects
+model in the output. With `--json`, it also writes the numbers as JSON for a results page.
+
+```mermaid
+flowchart LR
+  R["results file<br/>one row per run and seed"] --> Q["--query (optional)<br/>keep one comparison"]
+  Q --> A["analysis.arms<br/>one row per arm and metric"]
+  A --> T["printed table"]
+  A --> J["--json<br/>cbm-eval/arms/v1"]
+```
+
+This example varies only `discovery` on the offline anchor. The anchor's own arm is `dataset`:
+
+```yaml title="configs/ablations/synthetic_discovery.yaml"
+# Where do the concepts come from? Everything except discovery stays fixed.
+anchor: ../anchors/synthetic.yaml
+overrides: {stages.discovery: {name: dataset}}
+mode: ofat
+seeds: [0, 1, 2]
+factors:
+  stages.discovery:
+    - {name: sae, n_latents: 64, k: 6, epochs: 30}
+```
+
+The sweep writes to its own results file, so `analyze` sees only this comparison (runs that
+already exist elsewhere run again, which takes seconds here):
+
+```bash
+uv run cbm-eval sweep configs/ablations/synthetic_discovery.yaml \
+    --set paths.results=results/synthetic_discovery.jsonl              # 6 runs
+uv run cbm-eval analyze --results results/synthetic_discovery.jsonl \
+    --arms discovery --reference dataset \
+    --metrics shift.test.wga leakage.intervention.gain --json results/discovery_arms.json
+```
+
+```text
+discovery arms vs reference 'dataset' (mean and t interval over seeds; effect = arm - reference, Welch t interval)
+                            arm  seeds concepts discovered                    metric   mean             95% CI      effect      effect 95% CI
+                        dataset      3       20         24            shift.test.wga 0.5094 [+0.5094, +0.5094] (reference)
+sae(epochs=30,k=6,n_latents=64)      3       20         64            shift.test.wga 0.1235 [-0.0093, +0.2563]     -0.3860 [-0.5188, -0.2532]
+sae(epochs=30,k=6,n_latents=64)      3       20         64 leakage.intervention.gain 0.0008 [-0.0056, +0.0073]           -
+
+wrote results/discovery_arms.json
+```
+
+| Column | Meaning |
+|---|---|
+| `seeds` | distinct seeds of the arm |
+| `concepts` | concepts in the trained model (`metric.n_concepts`), mean over seeds |
+| `discovered` | concepts that discovery proposed, before filtering (`concept_trace.discovery`) |
+| `mean`, `95% CI` | the metric's mean over seeds and its Student t interval |
+| `effect`, `effect 95% CI` | `mean(arm) - mean(reference)` and its Welch t interval |
+
+- An arm that reports no value for a metric has no row for it. Here the `dataset` arm has no
+  `leakage.intervention.gain`, so the `sae` effect on it is `-`. All `dataset` concepts are
+  annotated, but `clip` alignment makes the concept layer continuous, and the `leakage`
+  evaluator then has no ground truth to intervene with.
+- The intervals use t quantiles and the variance of each arm. With 3 seeds this matters. The
+  effects model pools the variance of all arms and uses 1.96: on the same runs it gives
+  `[-0.4465, -0.3255]` for the `sae` effect. The intervals are not clipped to the metric's range.
+- `--reference` takes an arm label or a registered name (`dataset`, `sae`). Without it, the arm
+  with the most runs is the reference. If arms tie, `analyze` asks for `--reference`.
+- Each arm must be one configuration. If another factor or the `run_id` varies inside the rows,
+  `analyze` stops and names them. Restrict the rows with `--query`.
+
+### JSON schema `cbm-eval/arms/v1`
+
+`--json PATH` (or [`analysis.arms_json`][cbm_eval.analysis.arms_json]) writes one object:
+
+| Key | Type | Meaning |
+|---|---|---|
+| `schema` | string | always `"cbm-eval/arms/v1"` |
+| `factor` | string | the compared factor, e.g. `"discovery"` |
+| `reference` | string | the `arm` label of the reference arm |
+| `level` | number | confidence level of every interval (`0.95`) |
+| `metrics` | list of strings | the requested metrics, without the `metric.` prefix |
+| `arms` | list of objects | one per arm: the reference first, then the others by label |
+
+Each element of `arms`:
+
+| Key | Type | Meaning |
+|---|---|---|
+| `arm` | string | the factor label from the results, e.g. `"sae(epochs=30,k=6,n_latents=64)"`; unique |
+| `name` | string | the registered name, e.g. `"sae"`; two arms can share it |
+| `run_id` | string | the run id of the arm |
+| `reference` | bool | `true` for the reference arm |
+| `n_seeds` | int | distinct seeds |
+| `n_concepts` | number or null | concepts in the trained model, mean over seeds |
+| `n_discovered` | number or null | concepts proposed by discovery, mean over seeds |
+| `metrics` | object | metric name → metric object. A metric that the arm does not report is absent. |
+
+Each metric object:
+
+| Key | Type | Meaning |
+|---|---|---|
+| `n` | int | seeds that report the metric |
+| `mean` | number | mean over these seeds |
+| `std` | number or null | sample standard deviation; null with one seed |
+| `ci_low`, `ci_high` | number or null | t interval of the mean; null with one seed |
+| `effect` | object or null | null for the reference arm. Else `{diff, ci_low, ci_high}`: `mean - reference mean` and its Welch t interval. A value is null when the reference does not report the metric or a side has one seed. |
+
+NaN is written as `null`, so the file is strict JSON. Integral numbers are written as integers
+(`20`, `0`). Excerpt of the file above, rounded to 4 digits:
+
+```json
+{
+ "schema": "cbm-eval/arms/v1", "factor": "discovery", "reference": "dataset", "level": 0.95,
+ "metrics": ["shift.test.wga", "leakage.intervention.gain"],
+ "arms": [
+  {"arm": "dataset", "name": "dataset", "run_id": "8086b91c48", "reference": true,
+   "n_seeds": 3, "n_concepts": 20, "n_discovered": 24,
+   "metrics": {"shift.test.wga": {"n": 3, "mean": 0.5094, "std": 0, "ci_low": 0.5094, "ci_high": 0.5094,
+                                  "effect": null}}},
+  {"arm": "sae(epochs=30,k=6,n_latents=64)", "name": "sae", "run_id": "ecf55ad0f7", "reference": false,
+   "n_seeds": 3, "n_concepts": 20, "n_discovered": 64,
+   "metrics": {"shift.test.wga": {"n": 3, "mean": 0.1235, "std": 0.0535, "ci_low": -0.0093, "ci_high": 0.2563,
+                                  "effect": {"diff": -0.386, "ci_low": -0.5188, "ci_high": -0.2532}},
+               "leakage.intervention.gain": {"n": 3, "mean": 0.0008, "std": 0.0026, "ci_low": -0.0056,
+                                             "ci_high": 0.0073,
+                                             "effect": {"diff": null, "ci_low": null, "ci_high": null}}}}
+ ]
+}
+```
+
 ## Reproducing a paper
 
 A reproduction is an anchor (plus ablations) built from registered components, never a separate
