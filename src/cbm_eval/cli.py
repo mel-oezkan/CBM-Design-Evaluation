@@ -80,10 +80,23 @@ def cmd_analyze(args) -> None:
         df = df.query(args.query)
     metric = args.metric if args.metric.startswith("metric.") else f"metric.{args.metric}"
     factors = [f if f.startswith("factor.") else f"factor.{f}" for f in args.factors] if args.factors else None
+    if args.json and not args.arms:
+        sys.exit("--json writes the per-arm table: also pass --arms <factor>, e.g. --arms discovery")
     with pd.option_context("display.max_rows", 200, "display.width", 200, "display.max_colwidth", 60):
-        print(analysis.aggregate(df, [metric], analysis.varying_factors(df, factors) or ["run_id"]).to_string(index=False))
-        print()
-        print(analysis.summarize_effects(analysis.effects(df, metric, factors, group=args.group)))
+        if args.arms:
+            try:
+                table = analysis.arms(df, args.arms, args.metrics or [metric], args.reference)
+            except ValueError as e:
+                sys.exit(str(e))
+            print(analysis.summarize_arms(table))
+            if args.json:
+                Path(args.json).parent.mkdir(parents=True, exist_ok=True)
+                Path(args.json).write_text(json.dumps(analysis.arms_json(table), indent=1) + "\n")
+                print(f"\nwrote {args.json}")
+        else:
+            print(analysis.aggregate(df, [metric], analysis.varying_factors(df, factors) or ["run_id"]).to_string(index=False))
+            print()
+            print(analysis.summarize_effects(analysis.effects(df, metric, factors, group=args.group)))
         if args.frontier:
             other = args.frontier if args.frontier.startswith("metric.") else f"metric.{args.frontier}"
             agg = df.groupby("run_id")[[metric, other]].mean().reset_index()
@@ -140,6 +153,12 @@ def main(argv: list[str] | None = None) -> None:
     a.add_argument("--group", help="random-intercept grouping column, e.g. factor.dataset (needs statsmodels)")
     a.add_argument("--frontier", help="second metric for a Pareto frontier")
     a.add_argument("--query", help="pandas query to subset runs")
+    g = a.add_argument_group("per-arm comparison of one factor (replaces the table and effects model above)")
+    g.add_argument("--arms", metavar="FACTOR", help="factor whose levels are compared, e.g. discovery")
+    g.add_argument("--reference", help="arm the others are compared against: its label or registered name, "
+                                       "e.g. dataset (default: the arm with the most runs)")
+    g.add_argument("--metrics", nargs="+", help="metrics in the per-arm table (default: --metric)")
+    g.add_argument("--json", metavar="PATH", help="also write the per-arm table as JSON (schema cbm-eval/arms/v1)")
     a.set_defaults(func=cmd_analyze)
 
     sub.add_parser("list", help="list registered components").set_defaults(func=cmd_list)
