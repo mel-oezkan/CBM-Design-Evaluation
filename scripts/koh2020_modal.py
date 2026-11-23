@@ -3,7 +3,9 @@
 
 Thin glue only: unpack CUB next to the authors' split and call the pipeline exactly as locally, with
 live W&B tracking (each run streams its epoch history and ends with its metrics as the W&B summary).
-Caches, runs (with ``history.jsonl``) and results live on the Volume ``cbm-koh2020``.
+Caches, runs (with ``history.jsonl``) and results live on the Volume ``cbm-koh2020``. Before ``frozen``
+and ``anchors`` spawn work, they delete augmented views and patch features that no run used for
+``PRUNE_UNUSED_DAYS`` days (``cbm_eval.cache.prune``; ``scripts/cache_prune_modal.py`` also does it daily).
 
 - ``frozen``: the frozen-backbone arm (anchors and ablations). First one GPU container per distinct
   feature set extracts the clean and augmented-view features into the cache, then every
@@ -36,6 +38,7 @@ ANCHORS = ("cub_koh2020_independent", "cub_koh2020_sequential", "cub_koh2020")
 FROZEN = ("cub_koh2020_frozen_independent", "cub_koh2020_frozen_sequential", "cub_koh2020_frozen")
 FINETUNE_GPU = "A100-40GB"
 FEATURE_GPU = "A100-40GB"  # feature extraction is bound by JPEG decoding on its 16 CPUs
+PRUNE_UNUSED_DAYS = 5
 
 app = modal.App("cbm-koh2020-modular")
 vol = modal.Volume.from_name("cbm-koh2020", create_if_missing=True)
@@ -83,6 +86,17 @@ def _summary(rows: list[dict]) -> list[dict]:
     return [{k: row.get(k) for k in ("name", "run_id", "seed", "status")} |
             {m: row.get("metric", {}).get(m) for m in ("shift.test.acc", "concepts.test.concept_error")}
             for row in rows]
+
+
+@app.function(image=image, volumes={VOL: vol}, cpu=1, memory=1024, timeout=600)
+def prune_cache() -> list[str]:
+    """Delete stale large caches once, before a launch spawns work: a prune inside each worker could
+    delete a file that another worker has rewritten but not yet committed."""
+    from cbm_eval.cache import prune
+
+    removed = prune(Path(VOL, "cache"), PRUNE_UNUSED_DAYS)
+    vol.commit()
+    return [str(p) for p in removed]
 
 
 @app.function(image=image, volumes={VOL: vol}, gpu=FINETUNE_GPU, cpu=16, memory=32768, timeout=24 * 3600,
@@ -177,6 +191,7 @@ def anchors(anchors: str = ",".join(ANCHORS), seeds: str = "1,2,3", overrides: s
     Each (anchor, seed) is spawned, so with ``modal run --detach`` the launching machine may disconnect;
     follow with ``modal app logs`` and collect with ``fetch --arm finetune``."""
     overrides = overrides.split()
+    print(f"pruned {len(prune_cache.remote())} stale cache files", flush=True)
     for a in anchors.split(","):
         for s in seeds.split(","):
             call = run_anchor.spawn(a, int(s), overrides)
@@ -192,6 +207,7 @@ def frozen(only_anchors: bool = False, seeds: str = "1,2,3"):
     cfgs = _frozen_configs(only_anchors, [int(s) for s in seeds.split(",")])
     groups = _feature_groups(cfgs)
     print(f"{len(cfgs)} runs, {len(groups)} feature sets", flush=True)
+    print(f"pruned {len(prune_cache.remote())} stale cache files", flush=True)
     call = frozen_driver.spawn(cfgs, groups)
     print(f"spawned frozen_driver: {call.object_id}", flush=True)
 

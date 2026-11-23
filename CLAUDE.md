@@ -152,6 +152,8 @@ Kind-specific contracts:
   from a `self.kw` dict of the output-relevant constructor args (as `SyntheticDataset`, the
   instance sources and `GroundingDINOScorer` do) rather than listing fields by hand;
   `tests/test_cache_keys.py` enforces this. Args that only batch work stay out of the key.
+  A large cache that only some configs read calls `cache.mark_used(path)` on every read and write,
+  so `cbm-eval cache prune` can delete it when unused (as augmented views and patch features do).
   Never cache a partial or failed result: `ClaudeClient` raises on refused or cut-off responses
   instead of storing them, which is also why `max_tokens` can stay out of its key.
 - Randomness flows from `cfg.seed` (`seed_everything`); don't create unseeded generators.

@@ -135,6 +135,8 @@ uv run cbm-eval analyze --results results/cub_koh2020_frozen.jsonl --metric conc
 unpacks CUB on the worker and expects the authors' split on the Modal volume `cbm-koh2020` under
 `data/CUB_processed`, plus a Modal secret named `wandb` (every run streams its epoch history and metrics to W&B). Install
 the client with `uv sync --extra modal` and authenticate once with `uv run modal setup`.
+Augmented views on the volume that no run used for 5 days are deleted (see
+[Data](data.md)); a later launch extracts them again.
 
 ```bash
 uv run modal run scripts/koh2020_modal.py::frozen             # frozen arm: anchors and ablations
