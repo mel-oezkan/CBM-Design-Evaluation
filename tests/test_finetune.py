@@ -7,6 +7,7 @@ import torch
 
 from cbm_eval.backbones.toy import ToyBackbone
 from cbm_eval.pipeline import PipelineBuilder, run
+from cbm_eval.utils import resolve_device
 
 FT = {"epochs": 3, "lr": 0.05, "batch_size": 32, "patience": 3, "num_workers": 0}
 HUMAN = {"stages.alignment": {"name": "human"}}
@@ -54,6 +55,34 @@ def test_a_reused_context_drops_the_previous_runs_encoder(base_cfg):  # issue #2
     ctx = PipelineBuilder(base_cfg.with_overrides(HUMAN)).reuse(res.ctx)  # what run(cfg, ctx=...) does first
     images = torch.stack([s.image for s in ctx.dataset.samples("train")])
     assert torch.allclose(ctx.split("train").features, ToyBackbone().encode_images(images), atol=1e-5)
+
+
+def test_the_fine_tuned_encoder_moves_to_the_context_device(base_cfg, monkeypatch):  # issue #61
+    import cbm_eval.context as context
+
+    builder = PipelineBuilder(_cfg(base_cfg, {"name": "joint", "epochs": 2, "finetune": FT}))
+    ctx = builder.context()
+    concepts = builder.concepts(ctx)
+    for s in ctx.splits:  # cache the frozen features before the device changes
+        ctx.split(s)
+    ctx.device = torch.device("meta")  # stands in for a GPU; training stays on its default device, cpu
+    on_device = []
+
+    def encode(images, encoder, device, **kw):  # meta tensors hold no values, so only the devices are checked
+        on_device.append({p.device for p in encoder.parameters()} == {device})
+        return torch.zeros(len(images), ctx.feat_dim)
+
+    monkeypatch.setattr(context, "encode_split", encode)
+    builder.train(ctx, concepts)
+    assert on_device and all(on_device)
+
+
+@pytest.mark.skipif(resolve_device("auto").type == "cpu", reason="needs a GPU (cuda or mps)")
+def test_finetune_runs_with_training_on_cpu_and_context_on_the_gpu(base_cfg):  # issue #61, real devices
+    cfg = _cfg(base_cfg, {"name": "joint", "epochs": 2, "finetune": FT}).with_overrides({"device": "auto"})
+    res = run(cfg, save=False)
+    assert not math.isnan(res.metrics["shift.test.acc"])
+
 
 def test_finetune_needs_a_trainable_backbone(base_cfg, monkeypatch):
     monkeypatch.setattr(ToyBackbone, "trainable", False)
