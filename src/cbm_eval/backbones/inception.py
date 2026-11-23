@@ -24,7 +24,8 @@ from torchvision import transforms as T
 
 from ..registry import BACKBONES
 from ..utils import rng_preserved
-from .augment import KOH_BRIGHTNESS, KOH_RATIO, KOH_SATURATION, KOH_SCALE, koh_augment
+from . import augment
+from .augment import KOH_BRIGHTNESS, KOH_RATIO, KOH_SATURATION, KOH_SCALE
 from .base import Backbone
 
 _IMAGENET = ((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
@@ -119,7 +120,7 @@ class InceptionBackbone(Backbone):
 
     def augment_batch(self, images, g):
         """``train_transform`` as tensor operations on a decoded batch (see ``backbones.augment``)."""
-        return koh_augment(images, self.kw["image_size"], self.norm.mean, self.norm.std, g)
+        return augment.batch_augment(images, self.kw["image_size"], self.norm.mean, self.norm.std, g)
 
     @property
     def frozen(self) -> InceptionEncoder:

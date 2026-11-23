@@ -4,7 +4,7 @@ offline: the batch augmentation, the decoded-image accessor and a fine-tuned run
 import pytest
 import torch
 
-from cbm_eval.backbones.augment import koh_augment
+from cbm_eval.backbones.augment import batch_augment
 from cbm_eval.config import load_config
 from cbm_eval.pipeline import PipelineBuilder, run
 from cbm_eval.stages.training import Finetune
@@ -17,7 +17,7 @@ def _images():
 
 
 def test_batch_augmentation_is_seeded_and_shaped():
-    out = lambda seed: koh_augment(_images(), 32, [0.5] * 3, [2.0] * 3, torch.Generator().manual_seed(seed))
+    out = lambda seed: batch_augment(_images(), 32, [0.5] * 3, [2.0] * 3, torch.Generator().manual_seed(seed))
     assert out(0).shape == (2, 3, 32, 32)
     assert torch.equal(out(0), out(0)) and not torch.equal(out(0), out(1))
 
@@ -26,7 +26,7 @@ def test_batch_augmentation_crops_never_read_the_padding():
     """Images of different sizes share one padded batch; a constant image must stay constant."""
     ims = [torch.full((3, 40, 60), 200, dtype=torch.uint8), torch.full((3, 70, 30), 200, dtype=torch.uint8)]
     for seed in range(5):
-        x = koh_augment(ims, 32, [0.0] * 3, [1.0] * 3, torch.Generator().manual_seed(seed), brightness=0.0,
+        x = batch_augment(ims, 32, [0.0] * 3, [1.0] * 3, torch.Generator().manual_seed(seed), brightness=0.0,
                         saturation=(1.0, 1.0))
         assert torch.allclose(x, torch.full_like(x, 200 / 255), atol=1e-5)
 
@@ -93,7 +93,7 @@ def test_decoded_input_needs_a_backbone_that_augments_batches(base_cfg):
 def test_batch_augmentation_flips_about_half_the_images():
     im = torch.zeros(3, 40, 40, dtype=torch.uint8)
     im[:, :, 20:] = 255  # dark left half, bright right half
-    x = koh_augment([im] * 64, 16, [0.0] * 3, [1.0] * 3, torch.Generator().manual_seed(0), brightness=0.0,
+    x = batch_augment([im] * 64, 16, [0.0] * 3, [1.0] * 3, torch.Generator().manual_seed(0), brightness=0.0,
                     saturation=(1.0, 1.0), scale=(1.0, 1.0), ratio=(1.0, 1.0))
     flipped = x[:, 0, 8, 0] > x[:, 0, 8, -1]  # bright on the left
     assert 16 < int(flipped.sum()) < 48
@@ -107,8 +107,8 @@ def test_the_padded_store_gives_the_crops_of_per_batch_padding():
            for h, w in torch.randint(20, 80, (12, 2), generator=g)]
     store, idx = pad_images(ims), torch.tensor([5, 0, 11, 7])
     batch = PaddedImages(store.pixels[idx], store.sizes[idx])  # padded to the whole set's largest size
-    a = koh_augment(batch, 24, [0.5] * 3, [0.25] * 3, torch.Generator().manual_seed(0))
-    b = koh_augment([ims[i] for i in idx], 24, [0.5] * 3, [0.25] * 3, torch.Generator().manual_seed(0))
+    a = batch_augment(batch, 24, [0.5] * 3, [0.25] * 3, torch.Generator().manual_seed(0))
+    b = batch_augment([ims[i] for i in idx], 24, [0.5] * 3, [0.25] * 3, torch.Generator().manual_seed(0))
     assert torch.equal(a, b)
 
 

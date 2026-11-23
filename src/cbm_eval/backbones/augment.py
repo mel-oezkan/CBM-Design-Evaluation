@@ -1,9 +1,9 @@
-"""Koh et al.'s fine-tuning augmentation on batches of decoded images, on the training device.
+"""Fine-tuning augmentation on batches of decoded images, on the training device (Koh et al.'s by default).
 
 ``train_transform`` augments one PIL image at a time in the dataloader workers, so fine-tuning
 decodes and augments every JPEG again in every epoch, and the GPU waits for the CPU
 (``reports/speedups.html``, P7). With finetune ``input: decoded`` the images are decoded once
-(``Context.decoded``), and ``koh_augment`` applies the same augmentation to a whole batch with tensor
+(``Context.decoded``), and ``batch_augment`` applies the same augmentation to a whole batch with tensor
 operations. It draws its parameters from the same distributions as ``train_transform``, but the
 pixels differ:
 
@@ -16,6 +16,11 @@ pixels differ:
 ``roi_align`` needs one tensor, so the images are padded to a common size (``PaddedImages``), with
 their right and bottom edge pixels repeated into the padding. Fine-tuning pads the whole training
 set once (``pad_images``); a plain list is padded per batch.
+
+Why not torchvision: its random transforms take one draw per call (so a stacked batch gets one crop
+and one jitter) and use the global RNG. Applied image by image on the GPU, they take 53-61 ms per
+batch of 64, against 5.8 ms here and a 62 ms bf16 training step (A100-40GB, torch 2.8, 2026-11-23),
+so they would undo most of the speed-up.
 """
 
 from __future__ import annotations
@@ -26,7 +31,7 @@ from dataclasses import dataclass
 import torch
 
 # Koh et al.'s augmentation (after Cui et al., 2018): ColorJitter(brightness, saturation), then
-# RandomResizedCrop with torchvision's default scale and ratio. ``train_transform`` and ``koh_augment``
+# RandomResizedCrop with torchvision's default scale and ratio. ``train_transform`` and ``batch_augment``
 # both read these, so the PIL and the decoded path draw from the same distributions.
 KOH_BRIGHTNESS, KOH_SATURATION = 32 / 255, (0.5, 1.5)
 KOH_SCALE, KOH_RATIO = (0.08, 1.0), (3 / 4, 4 / 3)
@@ -93,7 +98,7 @@ def _saturation(x: torch.Tensor, f: torch.Tensor) -> torch.Tensor:
     return (f * x + (1 - f) * gray).clamp(0, 1)
 
 
-def koh_augment(images: PaddedImages | list[torch.Tensor], size: int, mean, std, g: torch.Generator,
+def batch_augment(images: PaddedImages | list[torch.Tensor], size: int, mean, std, g: torch.Generator,
                 brightness: float = KOH_BRIGHTNESS, saturation: tuple[float, float] = KOH_SATURATION,
                 scale: tuple[float, float] = KOH_SCALE, ratio: tuple[float, float] = KOH_RATIO) -> torch.Tensor:
     """Decoded uint8 images (``PaddedImages``, or a list [(3, H_i, W_i)] padded here) -> (B, 3, size, size)
