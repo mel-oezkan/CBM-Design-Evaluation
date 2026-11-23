@@ -14,6 +14,12 @@ uv run cbm-eval list         # every registered component, per registry
 uv run cbm-eval run configs/anchors/synthetic.yaml --seeds 0
 ```
 
+Anything heavier than the offline tests (feature extraction, runs on real data, GPU behaviour, data
+downloads) runs on Modal through `scripts/modal_ops.py`, never on the local machine. Each `launch`
+prices its worst case (timeout × live hourly rate) and refuses without an approved dollar cap
+covering it, or beyond the monthly free credit without `--allow-billing`; `budget`, `watch` and
+`ledger` show the spend. Do not `modal run` other scripts ad hoc.
+
 ## Architecture in one paragraph
 <!-- --8<-- [start:architecture] -->
 
