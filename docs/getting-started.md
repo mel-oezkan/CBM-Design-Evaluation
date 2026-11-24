@@ -207,6 +207,64 @@ To use one:
 
 Training runs on the CPU unless the training stage sets `device` (e.g. `device: auto`).
 
+## Run on Modal
+
+In this project's own setup, feature extraction, runs on real data and anything that needs a GPU
+run on [Modal](https://modal.com), not on the owner's machine. `scripts/modal_ops.py` is the
+launcher. It runs one shell command in a container on Modal and keeps the cost below a dollar cap
+that the project owner approves. It uses the owner's Modal volume `cbm-koh2020`; with your own Modal
+account it creates an empty volume of that name. Install the client with `uv sync --extra modal` and authenticate once with
+`uv run modal setup`.
+
+A launch has five steps:
+
+```text
+plan ──> owner approval ──> launch ──> watch ──> fetch
+ $ estimate   "yes, up to $X"    --approve-usd X   cost so far   results/modal/<launch_id>/
+```
+
+| Step | Command | What it does |
+|---|---|---|
+| 1. Plan | `budget`, `rates`, `estimate --profile l4 --max-hours 1 --hours 0.3` | Shows the spend this month, the free credit left, the $/h of each profile, and the expected and worst-case cost of the launch. |
+| 2. Owner approval | (none) | The owner reads the estimate and approves a dollar cap. Above the free credit, the owner must also agree to billing. |
+| 3. Launch | `launch --profile l4 --max-hours 1 --approve-usd 1.60 --purpose "#86" -- <command>` | Refuses if the worst case is above `--approve-usd`, or above the free credit without `--allow-billing`. Otherwise it starts the container, detached, and writes one line to the ledger. |
+| 4. Watch | `watch <launch_id> [--every 10]` | Shows the state (`pending`, `running`, `finished`, `failed`), the cost so far and the share of the cap used. |
+| 5. Fetch | `fetch <launch_id>` | Downloads the log, `results/` and `runs/` of the launch to `results/modal/<launch_id>/`. |
+
+Run each command as `uv run python scripts/modal_ops.py <command>`. `ledger` lists every launch
+with its worst case and its billed cost.
+
+The worst case is `(max_hours + 0.1 h) × hourly rate` of the profile. The 0.1 h is the container's
+start (`STARTUP_TIMEOUT_S`, 300 s) plus its idle scale-down (`SCALEDOWN_WINDOW_S`, 60 s) in
+`scripts/cbm_modal.py`; `modal_ops.py` reads both from there. It is a hard bound: the
+container's timeout is `max_hours`, its CPU and memory are limits, and it gets no retries and one
+container at most. Modal stops the container at the timeout even when the launching machine is off.
+At the 2026-11-23 rates, `--profile cpu --max-hours 0.25` has a worst case of $0.06.
+
+Inside the container, the command runs on a copy of your working tree with the locked
+dependencies. `results/` and `runs/` belong to the launch. `data/` and `.cache/` are on the project
+volume:
+
+- A feature cache filled by one launch serves every later launch, from every branch. The cache key
+  covers the dataset and the backbone, not the code. A branch that changes feature extraction
+  without changing `cache_key()` writes entries that other branches then read.
+- The volume holds `data/CUB_200_2011.tgz` and the authors' split `data/CUB_processed/`, not the
+  unpacked images. A CUB command unpacks the archive first. The dataset cache key contains the
+  resolved root, so the caches that `scripts/koh2020_modal.py` filled do not hit.
+- Result rows written on Modal have `git_commit: null` (#46). The launch's `launch.json` records the
+  commit, the branch and whether the working tree was dirty.
+
+```bash
+uv run python scripts/modal_ops.py launch --profile cpu --max-hours 0.25 --approve-usd 0.06 \
+    --purpose "smoke test" -- cbm-eval run configs/anchors/synthetic.yaml --seeds 0
+```
+
+!!! warning "Scripts that bypass the cap"
+    `scripts/koh2020_modal.py`, `scripts/speedup_bench_modal.py` and `scripts/cache_prune_modal.py`
+    are older Modal apps. They set their own GPUs and timeouts (up to 24 h on an A100) and do not
+    go through `modal_ops.py`, so nothing checks their cost. Get the owner's approval of a dollar
+    estimate before you `modal run` one of them.
+
 ## Next steps
 
 - [How a run works](how-it-works.md): what each stage does in the run you just trained, and
