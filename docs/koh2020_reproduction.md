@@ -139,13 +139,16 @@ Augmented views on the volume that no run used for 5 days are deleted (see
 [Data](data.md)); a later launch extracts them again.
 
 ```bash
-uv run modal run scripts/koh2020_modal.py::frozen             # frozen arm: anchors and ablations
+uv run modal run --detach scripts/koh2020_modal.py::frozen    # frozen arm: anchors and ablations
+uv run modal run --detach scripts/koh2020_modal.py::anchors   # fine-tuned arm, all seeds
 uv run modal run scripts/koh2020_modal.py::fetch --arm frozen # -> results/cub_koh2020_frozen.jsonl
-uv run modal run scripts/koh2020_modal.py::anchors            # fine-tuned arm, all seeds
 ```
 
-`frozen` first extracts every distinct feature set on a GPU container, then trains each
-`(config, seed)` on its own CPU container, skipping runs that already have results.
+`frozen` spawns a driver on Modal. The driver first extracts every distinct feature set on a GPU
+container, then trains each `(config, seed)` on its own CPU container, skipping runs that already
+have results and runs whose feature set failed. `frozen` and `anchors` return at once; without
+`--detach` the app stops with them and cancels the spawned work. Follow the runs with
+`uv run modal app logs -f <app id>` (`modal run` prints the app ID).
 
 ## Ablations
 

@@ -13,8 +13,11 @@ and ``anchors`` spawn work, they delete augmented views and patch features that 
   appends to one volume file can lose rows). Runs whose results file exists are skipped.
 - ``anchors``: the fine-tuned reproduction, one GPU container per (anchor, seed) in parallel.
 
-    uv run modal run scripts/koh2020_modal.py::frozen [--only-anchors] [--seeds 1,2,3]
-    uv run modal run scripts/koh2020_modal.py::anchors [--anchors cub_koh2020 --seeds 1 --overrides 'k=v ...']
+    uv run modal run --detach scripts/koh2020_modal.py::frozen [--only-anchors] [--seeds 1,2,3]
+    uv run modal run --detach scripts/koh2020_modal.py::anchors [--anchors cub_koh2020 --seeds 1 --overrides 'k=v ...']
+
+Both entrypoints spawn their work and return at once: without ``--detach`` the app stops with them
+and cancels the spawned calls.
     uv run modal run scripts/koh2020_modal.py::fetch --arm frozen     # merged -> results/cub_koh2020_frozen.jsonl
     uv run cbm-eval analyze --results results/cub_koh2020_frozen.jsonl --metric concepts.test.concept_error
 """
@@ -129,16 +132,33 @@ def _frozen_configs(only_anchors: bool, seeds: list[int]) -> list[dict]:
     return [c.to_dict() for c in unique.values()]
 
 
-def _feature_groups(cfgs: list[dict]) -> list[dict]:
-    """One config per distinct (dataset, backbone, augmented views) set: what ``frozen_features`` warms."""
+def _feature_key(d: dict) -> str:
+    """The (dataset, backbone, augmented views) set a config reads from the feature cache."""
     import hashlib
 
+    aug = d["stages"]["training"].get("augment")
+    key = json.dumps([d["dataset"], d["backbone"], aug and {k: aug.get(k) for k in ("views", "seed")}],
+                     sort_keys=True)
+    return hashlib.sha1(key.encode()).hexdigest()
+
+
+def _reads_val_views(d: dict) -> bool:
+    """Whether a config's training reads augmented views of the validation images (it trains on them)."""
+    from cbm_eval.config import ExperimentConfig
+    from cbm_eval.pipeline import PipelineBuilder
+
+    training = PipelineBuilder(ExperimentConfig.from_dict(d)).training  # cheap: components load lazily
+    return training.augment is not None and training._val_views
+
+
+def _feature_groups(cfgs: list[dict]) -> list[dict]:
+    """One config per distinct feature set: what ``frozen_features`` warms. Each group's config reads
+    the val views if any run of the group does, so no run extracts them on its CPU container."""
     groups = {}
     for d in cfgs:
-        aug = d["stages"]["training"].get("augment")
-        key = json.dumps([d["dataset"], d["backbone"], aug and {k: aug.get(k) for k in ("views", "seed")}],
-                         sort_keys=True)
-        groups.setdefault(hashlib.sha1(key.encode()).hexdigest(), d)
+        k = _feature_key(d)
+        if k not in groups or (_reads_val_views(d) and not _reads_val_views(groups[k])):
+            groups[k] = d
     return list(groups.values())
 
 
@@ -183,6 +203,29 @@ def frozen_run(cfg: dict) -> list[dict]:
     finally:
         vol.commit()
     return _summary(_rows(results))
+
+
+@app.function(image=image, volumes={VOL: vol}, cpu=1, memory=2048, timeout=24 * 3600)
+def frozen_driver(cfgs: list[dict], groups: list[dict]) -> list[dict]:
+    """Warm every feature set on GPU, then train each (config, seed) on its own CPU container.
+    Runs whose feature set failed are skipped: on a CPU container they would extract ~400k images."""
+    failed = set()
+    for g, out in zip(groups, frozen_features.map(groups, return_exceptions=True)):
+        if isinstance(out, BaseException):
+            failed.add(_feature_key(g))
+            print(f"features FAILED for {g['name']}: {out!r}", flush=True)
+        else:
+            print(f"features ready: {out}", flush=True)
+    todo = [c for c in cfgs if _feature_key(c) not in failed]
+    print(f"training {len(todo)} runs, skipping {len(cfgs) - len(todo)}", flush=True)
+    summary = []
+    for c, out in zip(todo, frozen_run.map(todo, return_exceptions=True)):
+        if isinstance(out, BaseException):
+            print(f"run FAILED {c['name']} seed {c['seed']}: {out!r}", flush=True)
+        else:
+            summary += out
+            print(json.dumps(out), flush=True)
+    return summary
 
 
 @app.local_entrypoint()
