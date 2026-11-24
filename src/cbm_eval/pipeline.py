@@ -157,7 +157,8 @@ class PipelineBuilder:
                                  f"'{self.cfg.backbone['name']}' is frozen-only (use e.g. inception)")
             encoder = ctx.backbone.encoder(aux=self.training.needs_aux)
             train_log = self.training.fit(layer, head, aligned, ctx, encoder=encoder)
-            ctx.use_encoder(encoder.eval(), num_workers=self.training.num_workers)  # inputs = fine-tuned features
+            # inputs = fine-tuned features; Context encodes on its own device, which may differ from training's
+            ctx.use_encoder(encoder.to(ctx.device).eval(), num_workers=self.training.num_workers)
         else:
             train_log = self.training.fit(layer, head, aligned, ctx)
         train_log |= {f"head.{k}": v for k, v in head.stats().items()}
