@@ -9,7 +9,8 @@ are resized to a square; ``mean: [0.5, 0.5, 0.5], std: [2, 2, 2]`` and ``eval_re
 reproduce Koh et al.'s code (which scales inputs that way before ``transform_input`` and
 center-crops eval images without resizing). The auxiliary tap (``aux_dim`` 768) is the pooled output
 of the ImageNet-trained ``AuxLogits`` convolutions on ``Mixed_6e``, without their classifier; a
-training stage with ``aux:`` puts Koh et al.'s auxiliary concept head on it.
+training stage with ``aux:`` puts Koh et al.'s auxiliary concept head on it. ``augment_batch`` applies
+the same augmentation to decoded batches on the training device (finetune ``input: decoded``).
 """
 
 from __future__ import annotations
@@ -23,6 +24,8 @@ from torchvision import transforms as T
 
 from ..registry import BACKBONES
 from ..utils import rng_preserved
+from . import augment
+from .augment import KOH_BRIGHTNESS, KOH_RATIO, KOH_SATURATION, KOH_SCALE
 from .base import Backbone
 
 _IMAGENET = ((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
@@ -86,6 +89,7 @@ class InceptionBackbone(Backbone):
 
     trainable = True
     aux_dim = 768
+    batch_augment = True
 
     def __init__(self, weights: str | None = "IMAGENET1K_V1", image_size: int = 299,
                  mean: list[float] | None = None, std: list[float] | None = None, eval_resize: bool = True):
@@ -109,9 +113,14 @@ class InceptionBackbone(Backbone):
 
     def train_transform(self):
         """Koh et al.'s augmentation (after Cui et al., 2018): color jitter, random resized crop, flip."""
-        return T.Compose([T.ColorJitter(brightness=32 / 255, saturation=(0.5, 1.5)),
-                          T.RandomResizedCrop(self.kw["image_size"]), T.RandomHorizontalFlip(),
+        return T.Compose([T.ColorJitter(brightness=KOH_BRIGHTNESS, saturation=KOH_SATURATION),
+                          T.RandomResizedCrop(self.kw["image_size"], scale=KOH_SCALE, ratio=KOH_RATIO),
+                          T.RandomHorizontalFlip(),
                           T.ToTensor(), self.norm])
+
+    def augment_batch(self, images, g):
+        """``train_transform`` as tensor operations on a decoded batch (see ``backbones.augment``)."""
+        return augment.batch_augment(images, self.kw["image_size"], self.norm.mean, self.norm.std, g)
 
     @property
     def frozen(self) -> InceptionEncoder:

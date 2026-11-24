@@ -155,6 +155,9 @@ class PipelineBuilder:
             if not ctx.backbone.trainable:
                 raise ValueError(f"`stages.training.finetune` needs a trainable backbone; "
                                  f"'{self.cfg.backbone['name']}' is frozen-only (use e.g. inception)")
+            if self.training.needs_batch_augment and not ctx.backbone.batch_augment:
+                raise ValueError(f"`stages.training.finetune.input: decoded` needs a backbone that augments decoded "
+                                 f"batches; '{self.cfg.backbone['name']}' does not (use `input: pil`, or inception)")
             encoder = ctx.backbone.encoder(aux=self.training.needs_aux)
             train_log = self.training.fit(layer, head, aligned, ctx, encoder=encoder)
             # inputs = fine-tuned features; Context encodes on its own device, which may differ from training's

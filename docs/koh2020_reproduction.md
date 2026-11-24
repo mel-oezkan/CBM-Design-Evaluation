@@ -42,6 +42,7 @@ CUB, mean ± 2 SD over 3 seeds, from the paper (fine-tuned backbone):
 | `configs/anchors/cub_koh2020_frozen.yaml` | Joint bottleneck (λ = 0.01), same |
 | `configs/ablations/cub_koh2020_frozen*.yaml` | Undo one detail of the authors' code at a time |
 | `configs/anchors/cub_koh2020{,_independent,_sequential}.yaml` | Fine-tuned arm |
+| `configs/ablations/cub_koh2020_speed.yaml` | Fine-tuned joint model with the fine-tuning speed options: `input: decoded` and `precision: bf16` one at a time, and together with `channels_last` |
 
 Each anchor's header comment lists what matches the authors' code and what does not.
 

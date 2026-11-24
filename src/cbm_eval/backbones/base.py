@@ -6,6 +6,10 @@ itself, and its cached features, stay frozen.
 
 Backbones with an ``aux_dim`` also expose an auxiliary feature tap on an intermediate layer
 (``encode_aux``), which a training stage with ``aux:`` uses for Koh et al.'s auxiliary concept head.
+
+Backbones with ``batch_augment = True`` also augment whole batches of decoded images on the training
+device (``augment_batch``), which fine-tuning with ``finetune: {input: decoded}`` uses instead of
+``train_transform`` in the dataloader workers.
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ class Backbone(ABC):
     has_text: bool = False
     trainable: bool = False  # True if ``encoder()`` returns a fine-tunable copy (training ``finetune:``)
     aux_dim: int | None = None  # width of the auxiliary feature tap (training ``aux:``), if there is one
+    batch_augment: bool = False  # True if ``augment_batch`` exists (finetune ``input: decoded``)
 
     def __init__(self) -> None:
         self.device = torch.device("cpu")
@@ -35,6 +40,13 @@ class Backbone(ABC):
     def train_transform(self) -> Callable | None:
         """Transform for images seen while fine-tuning (augmentation); defaults to ``transform()``."""
         return self.transform()
+
+    def augment_batch(self, images, g: torch.Generator) -> torch.Tensor:
+        """Decoded uint8 images (``backbones.augment.PaddedImages``, or a list [(3, H_i, W_i)]) -> (B, ...)
+        encoder inputs on the images' device,
+        augmented like ``train_transform`` (same distributions, not the same pixels), with every random
+        draw taken from ``g``."""
+        raise NotImplementedError(f"{type(self).__name__} cannot augment decoded batches (batch_augment = False)")
 
     def encoder(self, aux: bool = False) -> torch.nn.Module:
         """A fresh, trainable copy of the image encoder: ``transform()``-ed images (B, ...) -> (B, D),

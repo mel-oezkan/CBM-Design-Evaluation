@@ -109,7 +109,8 @@ Kind-specific contracts:
 - **Backbone**: frozen; set `dim` (and `patch_grid`, `has_text` where applicable).
   `cache_key()` must identify the weights exactly. Patch and text embeddings must live in the
   same space as `encode_images`. A network built lazily (on first use) is built under
-  `rng_preserved()`. Import optional heavy deps (`open_clip`, `transformers`) inside
+  `rng_preserved()`. Set `batch_augment = True` only with an `augment_batch` that draws from the same
+  distributions as `train_transform` (finetune `input: decoded`). Import optional heavy deps (`open_clip`, `transformers`) inside
   methods, not at module top level.
 - **Generation**: subclass `ConceptLayer`, implement `represent` and set `rep_dim`; concept
   predictions stay in target space so interventions keep working. Set `represent_uses_x = False`

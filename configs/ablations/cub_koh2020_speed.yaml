@@ -1,0 +1,14 @@
+# Koh et al. 2020, fine-tuned joint model: the fine-tuning speed options, one at a time and together.
+# They change results (decoded input: crops resampled by roi_align on the GPU instead of PIL in the
+# dataloader workers; bf16: lower precision in the encoder's forward pass), so the anchors keep the
+# original path until this comparison shows the metrics stay within seed noise.
+# Cost: every run fine-tunes Inception-v3 on an A100; see reports/ and docs/training.md before launching.
+anchor: ../anchors/cub_koh2020.yaml
+mode: ofat
+seeds: [1, 2, 3]
+factors:
+  stages.training.finetune.input: [decoded]    # decode once, augment each batch on the training device
+  stages.training.finetune.precision: [bf16]   # bf16 autocast in the encoder's training forward pass
+  stages.training.finetune:                    # the fast path: all options together
+    - {epochs: 1000, lr: 0.001, optimizer: sgd, momentum: 0.9, weight_decay: 0.0004, batch_size: 64,
+       patience: 100, num_workers: 8, input: decoded, precision: bf16, channels_last: true}

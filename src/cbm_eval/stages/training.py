@@ -23,6 +23,7 @@ trains on the validation split (Koh et al. retrain on train + val this way).
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import dataclasses
 import time
@@ -35,9 +36,10 @@ from torch import nn
 from torch.utils.data import ConcatDataset, DataLoader
 from torch.utils.data import Dataset as TorchDataset
 
+from ..backbones.augment import PaddedImages, pad_images
 from ..registry import TRAINING
 from ..structures import Bag
-from ..utils import resolve_device
+from ..utils import resolve_device, stable_hash
 from .base import AlignedConcepts, ConceptLayer, PredictorHead, Training
 
 CONCEPT_LOSSES = ("auto", "mse", "bce", "cosine")
@@ -312,6 +314,20 @@ class Finetune:
     when the fine-tuned phase trains on them (``train_on_val`` for joint, ``concept_train_on_val`` for
     x -> c). Early stopping with ``patience`` by the stage's ``select`` / ``concept_select``, restoring
     the best encoder, layer and head.
+
+    Speed options (opt-in; the defaults keep the original behaviour):
+
+    - ``input``: ``pil`` decodes and augments every image in the dataloader workers in every epoch
+      (``train_transform``). ``decoded`` decodes the images once (``Context.decoded``) and augments
+      each training batch on the training device (``Backbone.augment_batch``): same distributions,
+      not the same pixels, so results change. Validation and evaluation images are unchanged.
+    - ``precision``: ``bf16`` runs the encoder's training forward pass under bf16 autocast (no
+      GradScaler needed); weights, the concept layer, the head and evaluation stay fp32.
+    - ``channels_last``: the encoder and its image batches use channels-last memory, which speeds up
+      convolutions on tensor-core GPUs, most with ``bf16``.
+    - ``compile``: the encoder's training forward pass runs through ``torch.compile``, which fuses the
+      elementwise operations between the convolutions into generated Triton kernels. Compiling takes
+      minutes once per run; results change in the last digits, and dropout draws other random numbers.
     """
 
     epochs: int = 100
@@ -325,10 +341,21 @@ class Finetune:
     patience: int = 10
     augment: bool = True
     num_workers: int = 4
+    input: str = "pil"
+    precision: str = "fp32"
+    channels_last: bool = False
+    compile: bool = False
 
     def __post_init__(self):
         if self.optimizer not in OPTIMIZERS:
             raise ValueError(f"Unknown finetune optimizer '{self.optimizer}' (use 'sgd' or 'adam')")
+        if self.input not in ("pil", "decoded"):
+            raise ValueError(f"Unknown finetune input '{self.input}' (use 'pil' or 'decoded')")
+        if self.precision not in ("fp32", "bf16"):
+            raise ValueError(f"Unknown finetune precision '{self.precision}' (use 'fp32' or 'bf16')")
+        if self.input == "decoded" and not self.augment:
+            raise ValueError("`finetune.input: decoded` augments the decoded images; remove `augment: false` "
+                             "or use `input: pil`")
 
     def make_optimizer(self, params) -> torch.optim.Optimizer:
         return OptimizerSpec(self.optimizer, self.lr, self.momentum, self.weight_decay).build(params)
@@ -416,6 +443,16 @@ class _Offset(TorchDataset):
         return item | {"index": item["index"] + self.offset}
 
 
+def _decoded_store(images: list[torch.Tensor], device) -> PaddedImages | list[torch.Tensor]:
+    """Decoded training images on the device: padded once into one tensor (CUB: 4.5 GB instead of 3.2),
+    unless padding would more than double the memory (a few very large images); then a list, and
+    each batch is padded on its own. Both give the same crops."""
+    padded = len(images) * 3 * max(im.shape[1] for im in images) * max(im.shape[2] for im in images)
+    if padded <= 2 * sum(im.numel() for im in images):
+        return pad_images(images, device)
+    return [im.to(device) for im in images]
+
+
 class _ImageFeed:
     """Train / val images encoded on the fly by the trainable encoder, as ``Batch``es of features.
     With ``on_val`` the training batches draw from train + val (Koh et al.'s retraining), and
@@ -433,32 +470,70 @@ class _ImageFeed:
             self.labels[fit_split] = torch.cat([self.labels["train"], self.labels["val"]])
             t = self.targets["train"]
             self.targets[fit_split] = None if t is None else torch.cat([t, self.targets["val"]])
+        # on the device: indexing them per batch then needs no host-to-device copy, which would wait for the GPU
+        self.labels = {s: v.to(device) for s, v in self.labels.items()}
+        self.targets = {s: None if v is None else v.to(device) for s, v in self.targets.items()}
         g = torch.Generator().manual_seed(seed)
         pin = device.type == "cuda"
         ordered = lambda split: DataLoader(ctx.image_split(split), batch_size=2 * spec.batch_size, shuffle=False,
                                            num_workers=spec.num_workers, pin_memory=pin)
+        self.decoded: PaddedImages | list[torch.Tensor] | None = None
+        if spec.input == "decoded":  # train (+ val) decoded once, kept on the device, augmented per batch
+            splits = ("train", "val") if on_val else ("train",)
+            self.decoded = _decoded_store([im for s in splits for im in ctx.decoded(s, spec.num_workers)], device)
+            # its own stream: seed + 1 would replay the shuffle stream of the run with the next seed
+            self.shuffle = g
+            self.augment_g = torch.Generator().manual_seed(int(stable_hash([seed, "augment"]), 16))
+            self.augment_batch = ctx.backbone.augment_batch
+            train = None
+        else:
+            train = DataLoader(fit, batch_size=spec.batch_size, shuffle=True, drop_last=True, generator=g,
+                               num_workers=spec.num_workers, pin_memory=pin)
+        if spec.channels_last:
+            encoder.to(memory_format=torch.channels_last)
+        # compiled for the training batches only: evaluation, saving and the installed encoder keep the module
+        forward = encoder.forward_aux if aux else encoder
+        self.train_forward = torch.compile(forward) if spec.compile else forward
         self.loaders = {  # name -> (loader, split of its labels); "train": augmented, shuffled training batches
-            "train": (DataLoader(fit, batch_size=spec.batch_size, shuffle=True, drop_last=True, generator=g,
-                                 num_workers=spec.num_workers, pin_memory=pin), fit_split),
+            "train": (train, fit_split),
             "val": (ordered("val"), "val"),
             "train_ordered": (ordered("train"), "train"),
         }
 
+    def _images(self, name: str) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
+        """(images on the device, their indices into the loader's split) per batch. Training batches of
+        decoded images drop the last incomplete batch, as the training loader does."""
+        if name == "train" and self.decoded is not None:
+            order, bs = torch.randperm(len(self.decoded), generator=self.shuffle), self.spec.batch_size
+            order_dev = order.to(self.device)  # one copy per epoch, not one per batch
+            for k in range(len(order) // bs):
+                idx, idx_dev = order[k * bs:(k + 1) * bs], order_dev[k * bs:(k + 1) * bs]
+                batch = (PaddedImages(self.decoded.pixels[idx_dev], self.decoded.sizes[idx])
+                         if isinstance(self.decoded, PaddedImages) else [self.decoded[i] for i in idx.tolist()])
+                yield self.augment_batch(batch, self.augment_g), idx_dev
+            return
+        for item in self.loaders[name][0]:
+            yield (item["image"].to(self.device, non_blocking=True),
+                   item["index"].to(self.device, non_blocking=True))
+
     def batches(self, name: str) -> Iterator[Batch]:
         """Image batches -> feature batches; gradients reach the encoder in train mode. With ``aux``,
         training batches also carry the encoder's auxiliary-tap features ``xa``."""
-        loader, split = self.loaders[name]
+        split = self.loaders[name][1]
         t = self.targets[split]
-        for item in loader:
-            idx = item["index"]
-            images = item["image"].to(self.device, non_blocking=True)
-            if self.aux and name == "train":
-                x, xa = self.encoder.forward_aux(images)
-                xa = xa.float()
-            else:
-                x, xa = self.encoder(images), None
-            yield Batch(x.float(), self.labels[split][idx].to(self.device),
-                        None if t is None else t[idx].to(self.device), xa=xa)
+        bf16 = self.spec.precision == "bf16" and name == "train"  # selection and evaluation stay fp32
+        for images, idx in self._images(name):
+            if self.spec.channels_last and images.dim() == 4:
+                images = images.contiguous(memory_format=torch.channels_last)
+            with torch.autocast(self.device.type, dtype=torch.bfloat16) if bf16 else contextlib.nullcontext():
+                if name != "train":
+                    x, xa = self.encoder(images), None
+                elif self.aux:
+                    x, xa = self.train_forward(images)
+                    xa = xa.float()
+                else:
+                    x, xa = self.train_forward(images), None
+            yield Batch(x.float(), self.labels[split][idx], None if t is None else t[idx], xa=xa)
 
     @torch.no_grad()
     def encode(self, split: str) -> Batch:
@@ -500,7 +575,7 @@ def optimize_images(groups: list[ParamGroup], modules: list[nn.Module], feed: _I
                 g["lr"] = spec.lr * spec.lr_gamma ** ((epoch - 1) // spec.lr_step)
         for m in modules:
             m.train()
-        correct, seen, loss_sum, n_seen = 0.0, 0, torch.zeros(()), 0
+        accs, loss_sum, n_seen = [], torch.zeros(()), 0
         for b in feed.batches("train"):
             loss, acc = train_step(b)
             loss_sum, n_seen = loss_sum.to(loss.device) + loss.detach() * len(b), n_seen + len(b)
@@ -511,8 +586,11 @@ def optimize_images(groups: list[ParamGroup], modules: list[nn.Module], feed: _I
                 opt.step()
             if after_step is not None:
                 after_step()
-            if acc is not None:
-                correct, seen = correct + float(acc) * len(b), seen + len(b)
+            if acc is not None:  # read after the epoch: float(acc) here would wait for the GPU every step
+                accs.append((acc.detach() if torch.is_tensor(acc) else acc, len(b)))
+        correct, seen = 0.0, 0
+        for acc, n in accs:  # the same sum, in the same order, as accumulating per step
+            correct, seen = correct + float(acc) * n, seen + n
         for m in modules:
             m.eval()
         val = None if feed.on_val else _validate(feed, val_step)
@@ -594,6 +672,10 @@ class _Base(Training):
     @property
     def needs_aux(self) -> bool:
         return self.aux is not None
+
+    @property
+    def needs_batch_augment(self) -> bool:
+        return self.finetune is not None and self.finetune.input == "decoded"
 
     @property
     def num_workers(self) -> int:
